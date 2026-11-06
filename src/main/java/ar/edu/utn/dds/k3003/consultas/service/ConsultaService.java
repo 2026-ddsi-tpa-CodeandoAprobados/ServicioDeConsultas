@@ -39,6 +39,9 @@ public class ConsultaService {
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   private ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository donacionRepository;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private ar.edu.utn.dds.k3003.consultas.repositories.EntidadDocumentRepository entidadRepository;
+
   public ConsultaService(
       DonadorDocumentRepository donadorRepository,
       NecesidadDocumentRepository necesidadRepository,
@@ -139,6 +142,7 @@ public class ConsultaService {
     if (asignacionRepository != null) asignacionRepository.deleteAll();
     if (eventosProcesados != null) eventosProcesados.deleteAll();
     if (donacionRepository != null) donacionRepository.deleteAll();
+    if (entidadRepository != null) entidadRepository.deleteAll();
   }
 
   /**

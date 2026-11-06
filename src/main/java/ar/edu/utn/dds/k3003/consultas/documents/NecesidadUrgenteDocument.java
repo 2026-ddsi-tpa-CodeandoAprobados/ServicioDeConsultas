@@ -37,5 +37,9 @@ public class NecesidadUrgenteDocument implements Serializable {
 
   @Builder.Default private Boolean satisfecha = false;
 
+  /**
+   * Timestamp del último evento de Donadores y Entidades aplicado (NECESIDAD_*). Los eventos de Logística
+   * actualizan {@code stockPorDeposito} y {@code unidadesAsignadasPendientes} sin tocarlo.
+   */
   private Instant ultimaActualizacion;
 }

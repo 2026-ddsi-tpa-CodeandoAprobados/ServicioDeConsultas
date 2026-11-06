@@ -30,6 +30,12 @@ public class ConsultaService {
   private final CalidadDonacionRepository calidadRepository;
   private final MongoTemplate mongoTemplate;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository asignacionRepository;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository eventosProcesados;
+
   public ConsultaService(
       DonadorDocumentRepository donadorRepository,
       NecesidadDocumentRepository necesidadRepository,
@@ -127,5 +133,7 @@ public class ConsultaService {
     necesidadRepository.deleteAll();
     depositoRepository.deleteAll();
     calidadRepository.deleteAll();
+    if (asignacionRepository != null) asignacionRepository.deleteAll();
+    if (eventosProcesados != null) eventosProcesados.deleteAll();
   }
 }

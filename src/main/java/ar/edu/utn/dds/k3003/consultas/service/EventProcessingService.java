@@ -2,13 +2,17 @@ package ar.edu.utn.dds.k3003.consultas.service;
 
 import ar.edu.utn.dds.k3003.consultas.documents.*;
 import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
+import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.NecesidadDocumentRepository;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Slf4j
@@ -19,6 +23,13 @@ public class EventProcessingService {
   private final NecesidadDocumentRepository necesidadRepository;
   private final DepositoDocumentRepository depositoRepository;
   private final CalidadDonacionRepository calidadRepository;
+
+  // Se inyectan por campo (y son opcionales) para no cambiar el constructor que usan los tests.
+  @Autowired(required = false)
+  private AsignacionDocumentRepository asignacionRepository;
+
+  @Autowired(required = false)
+  private EventoProcesadoRepository eventosProcesados;
 
   public EventProcessingService(
       DonadorDocumentRepository donadorRepository,
@@ -37,6 +48,10 @@ public class EventProcessingService {
     }
 
     String tipo = evento.getTipo().toUpperCase();
+    if (yaProcesado(evento)) {
+      log.info("Evento repetido '{}' [ID: {}], se ignora", tipo, evento.getId());
+      return;
+    }
     log.info("Procesando evento CQRS '{}' para referencia '{}' [ID: {}]", tipo, evento.getIdReferencia(), evento.getId());
 
     try {
@@ -62,11 +77,16 @@ public class EventProcessingService {
         handleNecesidadModificada(evento);
       } else if (tipo.contains("NECESIDAD_ELIMINADA")) {
         handleNecesidadEliminada(evento);
+      } else if (tipo.contains("ASIGNACION") || tipo.equals("ENTREGA_COMPLETADA")) {
+        handleAsignacion(evento);
+      } else if (tipo.equals("BASE_LIMPIADA")) {
+        handleBaseLimpiada();
       } else if (tipo.contains("DEPOSITO")) {
         handleDeposito(evento);
       } else {
         log.warn("Evento no mapeado explícitamente: {}", tipo);
       }
+      marcarProcesado(evento);
     } catch (Exception e) {
       log.error("Error al procesar evento '{}' en MongoDB: {}", tipo, e.getMessage(), e);
     }
@@ -307,23 +327,35 @@ public class EventProcessingService {
     }
   }
 
+  /**
+   * Depósito tal como lo publica Logística: id, nombre, direccion, capacidadMaxima, unidadesOcupadas,
+   * algoritmo y la lista stock de {paqueteId, donacionId, productoId, cantidad}. También acepta los
+   * nombres anteriores (capacidadTotal, stockActual, algoritmoMatchmaking).
+   */
   private void handleDeposito(EventoGenerico evento) {
+    String tipo = evento.getTipo().toUpperCase();
     Map<String, Object> dep = evento.getDeposito() != null ? evento.getDeposito() : evento.getExtra();
-    String depositoId = evento.getIdReferencia() != null ? evento.getIdReferencia() : (String) dep.get("id");
+    String depositoId = evento.getIdReferencia() != null ? evento.getIdReferencia() : texto(dep, "id");
     if (depositoId == null) return;
+
+    if (tipo.contains("ELIMINADO")) {
+      depositoRepository.deleteById(depositoId);
+      quitarDepositoDeLasNecesidades(depositoId);
+      log.info("Depósito eliminado de MongoDB: {}", depositoId);
+      return;
+    }
 
     DepositoDocument doc = depositoRepository.findById(depositoId)
         .orElseGet(() -> DepositoDocument.builder().id(depositoId).build());
+    if (noEsMasNuevo(doc.getUltimaActualizacion(), evento)) return;
 
-    if (dep.containsKey("nombre")) doc.setNombre((String) dep.get("nombre"));
-    if (dep.containsKey("capacidadTotal") && dep.get("capacidadTotal") instanceof Number n) {
-      doc.setCapacidadTotal(n.intValue());
-    }
-    if (dep.containsKey("stockActual") && dep.get("stockActual") instanceof Number n) {
-      doc.setStockActual(n.intValue());
-    }
-    if (dep.containsKey("algoritmoMatchmaking")) {
-      doc.setAlgoritmoMatchmaking((String) dep.get("algoritmoMatchmaking"));
+    if (texto(dep, "nombre") != null) doc.setNombre(texto(dep, "nombre"));
+    Integer capacidad = numero(dep, "capacidadMaxima", "capacidadTotal");
+    if (capacidad != null) doc.setCapacidadTotal(capacidad);
+    Integer ocupadas = numero(dep, "unidadesOcupadas", "stockActual");
+    if (ocupadas != null) doc.setStockActual(ocupadas);
+    if (dep.containsKey("algoritmo") || dep.containsKey("algoritmoMatchmaking")) {
+      doc.setAlgoritmoMatchmaking(texto(dep, "algoritmo", "algoritmoMatchmaking"));
     }
     if (doc.getCapacidadTotal() != null && doc.getCapacidadTotal() > 0 && doc.getStockActual() != null) {
       doc.setOcupacionPorcentaje((double) doc.getStockActual() / doc.getCapacidadTotal() * 100.0);
@@ -334,6 +366,148 @@ public class EventProcessingService {
 
     doc.setUltimaActualizacion(evento.getTimestamp());
     depositoRepository.save(doc);
+
+    if (dep.get("stock") instanceof List<?> stock) {
+      actualizarStockPorDeposito(depositoId, stock);
+    }
+  }
+
+  /** Las necesidades guardan cuánto stock de su producto hay en cada depósito (consulta 2). */
+  private void actualizarStockPorDeposito(String depositoId, List<?> stock) {
+    Map<String, Integer> porProducto = new HashMap<>();
+    for (Object item : stock) {
+      if (item instanceof Map<?, ?> paquete) {
+        Object producto = paquete.get("productoId");
+        Object cantidad = paquete.get("cantidad");
+        if (producto != null && cantidad instanceof Number n) {
+          porProducto.merge(String.valueOf(producto), n.intValue(), Integer::sum);
+        }
+      }
+    }
+    for (NecesidadUrgenteDocument necesidad : necesidadRepository.findAll()) {
+      Integer actual = necesidad.getStockPorDeposito().get(depositoId);
+      Integer nuevo = porProducto.get(necesidad.getProductoSolicitadoId());
+      if (nuevo == null && actual != null) {
+        necesidad.getStockPorDeposito().remove(depositoId);
+        necesidadRepository.save(necesidad);
+      } else if (nuevo != null && !nuevo.equals(actual)) {
+        necesidad.getStockPorDeposito().put(depositoId, nuevo);
+        necesidadRepository.save(necesidad);
+      }
+    }
+  }
+
+  private void quitarDepositoDeLasNecesidades(String depositoId) {
+    for (NecesidadUrgenteDocument necesidad : necesidadRepository.findAll()) {
+      if (necesidad.getStockPorDeposito().remove(depositoId) != null) {
+        necesidadRepository.save(necesidad);
+      }
+    }
+  }
+
+  /**
+   * ASIGNACION_CREADA y ENTREGA_COMPLETADA traen el estado completo de la asignación: se reemplaza
+   * el documento, salvo que el evento sea más viejo que lo guardado.
+   */
+  private void handleAsignacion(EventoGenerico evento) {
+    if (asignacionRepository == null) return;
+    Map<String, Object> a = evento.getAsignacion() != null ? evento.getAsignacion() : evento.getExtra();
+    String id = evento.getIdReferencia() != null ? evento.getIdReferencia() : texto(a, "id");
+    if (id == null) return;
+
+    AsignacionDocument doc = asignacionRepository.findById(id)
+        .orElseGet(() -> AsignacionDocument.builder().id(id).build());
+    if (noEsMasNuevo(doc.getUltimaActualizacion(), evento)) return;
+
+    doc.setPaqueteId(texto(a, "paqueteId"));
+    doc.setDonacionId(texto(a, "donacionId"));
+    doc.setProductoId(texto(a, "productoId"));
+    doc.setCantidad(numero(a, "cantidad"));
+    doc.setNecesidadId(texto(a, "necesidadId"));
+    doc.setOrigen(texto(a, "origen"));
+    doc.setEstado(texto(a, "estado"));
+    doc.setFechaAsignacion(instante(a, "fechaAsignacion"));
+    doc.setFechaEntrega(instante(a, "fechaEntrega"));
+    if (doc.getNecesidadId() != null) {
+      necesidadRepository.findById(doc.getNecesidadId()).ifPresent(n -> doc.setEntidadId(n.getEntidadId()));
+    }
+    doc.setUltimaActualizacion(evento.getTimestamp());
+    asignacionRepository.save(doc);
+    log.info("Asignación guardada en MongoDB: {} ({})", id, doc.getEstado());
+
+    actualizarPendientesDeLaNecesidad(doc.getNecesidadId());
+  }
+
+  /** Unidades ya asignadas a la necesidad que todavía no se entregaron (consulta 2). */
+  private void actualizarPendientesDeLaNecesidad(String necesidadId) {
+    if (necesidadId == null) return;
+    int pendientes = asignacionRepository.findByNecesidadId(necesidadId).stream()
+        .filter(x -> "ASIGNADA".equalsIgnoreCase(x.getEstado()))
+        .mapToInt(x -> x.getCantidad() == null ? 0 : x.getCantidad())
+        .sum();
+    necesidadRepository.findById(necesidadId).ifPresent(n -> {
+      n.setUnidadesAsignadasPendientes(pendientes);
+      necesidadRepository.save(n);
+    });
+  }
+
+  /** Se reinició la base de Logística: se borra lo que Logística había aportado al modelo de lectura. */
+  private void handleBaseLimpiada() {
+    depositoRepository.deleteAll();
+    if (asignacionRepository != null) asignacionRepository.deleteAll();
+    for (NecesidadUrgenteDocument necesidad : necesidadRepository.findAll()) {
+      necesidad.getStockPorDeposito().clear();
+      necesidad.setUnidadesAsignadasPendientes(0);
+      necesidadRepository.save(necesidad);
+    }
+    log.info("Modelo de lectura de Logística reiniciado");
+  }
+
+  // ----- idempotencia: un evento repetido no se aplica dos veces -----
+
+  private boolean yaProcesado(EventoGenerico evento) {
+    return eventosProcesados != null && evento.getId() != null && eventosProcesados.existsById(evento.getId());
+  }
+
+  private void marcarProcesado(EventoGenerico evento) {
+    if (eventosProcesados != null && evento.getId() != null) {
+      eventosProcesados.save(
+          EventoProcesado.builder().id(evento.getId()).procesadoEn(Instant.now()).build());
+    }
+  }
+
+  /** Igual o más viejo que lo guardado: no aporta nada (cubre repetidos y desordenados). */
+  private boolean noEsMasNuevo(Instant ultimaActualizacion, EventoGenerico evento) {
+    return ultimaActualizacion != null
+        && evento.getTimestamp() != null
+        && !evento.getTimestamp().isAfter(ultimaActualizacion);
+  }
+
+  // ----- lectura segura de los mapas que llegan en el evento -----
+
+  private static String texto(Map<String, Object> mapa, String... claves) {
+    for (String clave : claves) {
+      Object valor = mapa.get(clave);
+      if (valor != null) return String.valueOf(valor);
+    }
+    return null;
+  }
+
+  private static Integer numero(Map<String, Object> mapa, String... claves) {
+    for (String clave : claves) {
+      if (mapa.get(clave) instanceof Number n) return n.intValue();
+    }
+    return null;
+  }
+
+  private static Instant instante(Map<String, Object> mapa, String clave) {
+    Object valor = mapa.get(clave);
+    if (valor == null) return null;
+    try {
+      return Instant.parse(String.valueOf(valor));
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   private boolean esObsoleto(java.time.Instant ultimaActualizacion, EventoGenerico evento) {

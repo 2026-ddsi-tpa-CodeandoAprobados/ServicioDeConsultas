@@ -34,6 +34,9 @@ public class DonadorDocument implements Serializable {
 
   private MisionEnCurso misionEnCurso;
 
+  /** Nombres de las misiones que el donador ya cumplió (las informa Incentivos). */
+  @Builder.Default private List<String> misionesCompletadas = new ArrayList<>();
+
   @Builder.Default private Map<String, Integer> donacionesPorEstado = new HashMap<>();
 
   @Builder.Default private Integer quejasRecibidas = 0;
@@ -42,4 +45,10 @@ public class DonadorDocument implements Serializable {
   private List<EntidadBeneficiadaResumen> entidadesBeneficiadas = new ArrayList<>();
 
   private Instant ultimaActualizacion;
+
+  /**
+   * Timestamp del último evento de Incentivos aplicado. Va separado de {@code ultimaActualizacion} para
+   * que los eventos de otros módulos no hagan descartar los de Incentivos (y al revés).
+   */
+  private Instant ultimaActualizacionIncentivos;
 }

@@ -18,4 +18,6 @@ public interface NecesidadDocumentRepository
   List<NecesidadUrgenteDocument> findByCategoriaProductoAndSatisfechaFalse(String categoriaProducto);
 
   List<NecesidadUrgenteDocument> findByProductoSolicitadoId(String productoSolicitadoId);
+
+  List<NecesidadUrgenteDocument> findByEntidadId(String entidadId);
 }

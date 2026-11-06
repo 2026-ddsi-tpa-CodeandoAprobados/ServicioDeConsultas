@@ -10,5 +10,7 @@ public interface AsignacionDocumentRepository extends MongoRepository<Asignacion
 
   List<AsignacionDocument> findByNecesidadId(String necesidadId);
 
+  List<AsignacionDocument> findByEntidadId(String entidadId);
+
   List<AsignacionDocument> findByDonacionIdIn(java.util.Collection<String> donacionIds);
 }

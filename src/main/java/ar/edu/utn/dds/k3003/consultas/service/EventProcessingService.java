@@ -4,6 +4,7 @@ import ar.edu.utn.dds.k3003.consultas.documents.*;
 import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
 import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.EntidadDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
@@ -34,6 +35,9 @@ public class EventProcessingService {
 
   @Autowired(required = false)
   private DonacionDocumentRepository donacionRepository;
+
+  @Autowired(required = false)
+  private EntidadDocumentRepository entidadRepository;
 
   public EventProcessingService(
       DonadorDocumentRepository donadorRepository,
@@ -87,6 +91,13 @@ public class EventProcessingService {
         handleBaseLimpiada();
       } else if (tipo.contains("DEPOSITO")) {
         handleDeposito(evento);
+      } else if (tipo.startsWith("ENTIDAD_")) {
+        handleEntidad(evento);
+      } else if (tipo.equals("ENTIDADES_TODAS_ELIMINADAS")) {
+        handleEntidadesTodasEliminadas();
+      } else if (tipo.equals("DONADORES_TODOS_ELIMINADOS")) {
+        donadorRepository.deleteAll();
+        log.info("Todos los donadores eliminados del modelo de lectura");
       } else {
         log.warn("Evento no mapeado explícitamente: {}", tipo);
       }
@@ -381,23 +392,35 @@ public class EventProcessingService {
     calidadRepository.saveAll(acumulado.values());
   }
 
+  /**
+   * Necesidad tal como la publica Donadores: id, entidadID, nivelDeUrgencia, descripcion, cantidadObjetivo,
+   * productoSolicitadoID y tipo. La razón social sale de las entidades ya conocidas, el stock de lo que ya
+   * hay en los depósitos y las asignaciones que llegaron antes que la necesidad se completan con su entidad.
+   */
   private void handleNecesidadRegistrada(EventoGenerico evento) {
     Map<String, Object> nec = evento.getNecesidad() != null ? evento.getNecesidad() : evento.getExtra();
     String necesidadId = evento.getIdReferencia() != null ? evento.getIdReferencia() : (String) nec.get("id");
     if (necesidadId == null) return;
 
-    Integer cantidad = nec.get("cantidadObjetivo") instanceof Number n ? n.intValue() : 0;
-    Integer urgencia = nec.get("urgencia") instanceof Number n ? n.intValue() : 5;
+    Integer cantidad = numero(nec, "cantidadObjetivo");
+    if (cantidad == null) cantidad = 0;
+    Integer urgencia = numero(nec, "nivelDeUrgencia", "urgencia");
+    if (urgencia == null) urgencia = 5;
+    String entidadId = texto(nec, "entidadID", "entidadId");
+    String razonSocial = texto(nec, "entidadRazonSocial");
+    if (razonSocial == null && entidadId != null && entidadRepository != null) {
+      razonSocial = entidadRepository.findById(entidadId).map(EntidadDocument::getRazonSocial).orElse(null);
+    }
 
     NecesidadUrgenteDocument doc = NecesidadUrgenteDocument.builder()
         .id(necesidadId)
-        .entidadId((String) nec.get("entidadID"))
-        .entidadRazonSocial((String) nec.get("entidadRazonSocial"))
-        .productoSolicitadoId((String) nec.get("productoSolicitadoID"))
-        .productoNombre((String) nec.get("productoNombre"))
-        .categoriaProducto((String) nec.get("categoriaProducto"))
-        .subcategoriaProducto((String) nec.get("subcategoriaProducto"))
-        .tipoNecesidad((String) nec.get("tipo"))
+        .entidadId(entidadId)
+        .entidadRazonSocial(razonSocial)
+        .productoSolicitadoId(texto(nec, "productoSolicitadoID", "productoSolicitadoId"))
+        .productoNombre(texto(nec, "productoNombre"))
+        .categoriaProducto(texto(nec, "categoriaProducto"))
+        .subcategoriaProducto(texto(nec, "subcategoriaProducto"))
+        .tipoNecesidad(texto(nec, "tipo", "tipoNecesidad"))
         .urgencia(urgencia)
         .cantidadObjetivo(cantidad)
         .cantidadFaltante(cantidad)
@@ -405,8 +428,86 @@ public class EventProcessingService {
         .ultimaActualizacion(evento.getTimestamp())
         .build();
 
+    for (DepositoDocument deposito : depositoRepository.findAll()) {
+      Integer enStock = deposito.getStockPorProducto() == null || doc.getProductoSolicitadoId() == null
+          ? null
+          : deposito.getStockPorProducto().get(doc.getProductoSolicitadoId());
+      if (enStock != null && enStock > 0) doc.getStockPorDeposito().put(deposito.getId(), enStock);
+    }
     necesidadRepository.save(doc);
     log.info("Necesidad urgente guardada en MongoDB: {}", necesidadId);
+
+    if (asignacionRepository != null) {
+      completarAsignacionesDeLaNecesidad(doc);
+      actualizarPendientesDeLaNecesidad(necesidadId);
+    }
+  }
+
+  /** Las asignaciones que llegaron antes que su necesidad no sabían la entidad: se la ponemos ahora. */
+  private void completarAsignacionesDeLaNecesidad(NecesidadUrgenteDocument necesidad) {
+    Set<String> donaciones = new LinkedHashSet<>();
+    for (AsignacionDocument a : asignacionRepository.findByNecesidadId(necesidad.getId())) {
+      a.setEntidadId(necesidad.getEntidadId());
+      a.setEntidadRazonSocial(necesidad.getEntidadRazonSocial());
+      asignacionRepository.save(a);
+      if (a.getDonacionId() != null) donaciones.add(a.getDonacionId());
+    }
+    recalcularDonadoresDe(donaciones);
+  }
+
+  private void recalcularDonadoresDe(Collection<String> donacionIds) {
+    if (donacionRepository == null) return;
+    for (String id : donacionIds) {
+      donacionRepository.findById(id).ifPresent(d -> recalcularDonador(d.getDonadorId()));
+    }
+  }
+
+  /**
+   * Eventos de entidades: ENTIDAD_CREADA trae la entidad completa, ENTIDAD_RAZON_MODIFICADA trae la nueva
+   * razón social en extra y ENTIDAD_ELIMINADA solo el id. La razón social se copia a las necesidades y a
+   * las asignaciones de la entidad.
+   */
+  private void handleEntidad(EventoGenerico evento) {
+    Map<String, Object> datos = evento.getEntidad() != null ? evento.getEntidad() : evento.getExtra();
+    String entidadId = evento.getIdReferencia() != null ? evento.getIdReferencia() : texto(datos, "id");
+    if (entidadId == null) return;
+
+    if (evento.getTipo().toUpperCase().contains("ELIMINADA")) {
+      if (entidadRepository != null) entidadRepository.deleteById(entidadId);
+      return;
+    }
+    String razonSocial = texto(datos, "razonSocial");
+    if (razonSocial == null) return;
+
+    if (entidadRepository != null) {
+      EntidadDocument doc = entidadRepository.findById(entidadId)
+          .orElseGet(() -> EntidadDocument.builder().id(entidadId).build());
+      if (noEsMasNuevo(doc.getUltimaActualizacion(), evento)) return;
+      doc.setRazonSocial(razonSocial);
+      doc.setUltimaActualizacion(evento.getTimestamp());
+      entidadRepository.save(doc);
+    }
+
+    for (NecesidadUrgenteDocument n : necesidadRepository.findByEntidadId(entidadId)) {
+      n.setEntidadRazonSocial(razonSocial);
+      necesidadRepository.save(n);
+    }
+    if (asignacionRepository != null) {
+      Set<String> donaciones = new LinkedHashSet<>();
+      for (AsignacionDocument a : asignacionRepository.findByEntidadId(entidadId)) {
+        a.setEntidadRazonSocial(razonSocial);
+        asignacionRepository.save(a);
+        if (a.getDonacionId() != null) donaciones.add(a.getDonacionId());
+      }
+      recalcularDonadoresDe(donaciones);
+    }
+  }
+
+  /** Donadores y Entidades borró todas las entidades y, con ellas, sus necesidades. */
+  private void handleEntidadesTodasEliminadas() {
+    if (entidadRepository != null) entidadRepository.deleteAll();
+    necesidadRepository.deleteAll();
+    log.info("Todas las entidades y sus necesidades eliminadas del modelo de lectura");
   }
 
   private void handleNecesidadModificada(EventoGenerico evento) {
@@ -477,6 +578,10 @@ public class EventProcessingService {
       doc.getEntidadesDistintasAtendidas().add((String) dep.get("entidadAtendidaId"));
     }
 
+    if (dep.get("stock") instanceof List<?> items) {
+      doc.setStockPorProducto(agruparStock(items));
+    }
+
     doc.setUltimaActualizacion(evento.getTimestamp());
     depositoRepository.save(doc);
 
@@ -487,16 +592,7 @@ public class EventProcessingService {
 
   /** Las necesidades guardan cuánto stock de su producto hay en cada depósito (consulta 2). */
   private void actualizarStockPorDeposito(String depositoId, List<?> stock) {
-    Map<String, Integer> porProducto = new HashMap<>();
-    for (Object item : stock) {
-      if (item instanceof Map<?, ?> paquete) {
-        Object producto = paquete.get("productoId");
-        Object cantidad = paquete.get("cantidad");
-        if (producto != null && cantidad instanceof Number n) {
-          porProducto.merge(String.valueOf(producto), n.intValue(), Integer::sum);
-        }
-      }
-    }
+    Map<String, Integer> porProducto = agruparStock(stock);
     for (NecesidadUrgenteDocument necesidad : necesidadRepository.findAll()) {
       Integer actual = necesidad.getStockPorDeposito().get(depositoId);
       Integer nuevo = porProducto.get(necesidad.getProductoSolicitadoId());
@@ -508,6 +604,21 @@ public class EventProcessingService {
         necesidadRepository.save(necesidad);
       }
     }
+  }
+
+  /** Suma las unidades de cada producto de la lista de paquetes que trae el evento del depósito. */
+  private static Map<String, Integer> agruparStock(List<?> stock) {
+    Map<String, Integer> porProducto = new HashMap<>();
+    for (Object item : stock) {
+      if (item instanceof Map<?, ?> paquete) {
+        Object producto = paquete.get("productoId");
+        Object cantidad = paquete.get("cantidad");
+        if (producto != null && cantidad instanceof Number n) {
+          porProducto.merge(String.valueOf(producto), n.intValue(), Integer::sum);
+        }
+      }
+    }
+    return porProducto;
   }
 
   private void quitarDepositoDeLasNecesidades(String depositoId) {

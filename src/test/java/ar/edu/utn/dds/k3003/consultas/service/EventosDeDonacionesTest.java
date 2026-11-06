@@ -8,7 +8,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import ar.edu.utn.dds.k3003.consultas.documents.AsignacionDocument;
-import ar.edu.utn.dds.k3003.consultas.documents.CalidadDonacionDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DepositoDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DonacionDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DonadorDocument;
@@ -16,7 +15,6 @@ import ar.edu.utn.dds.k3003.consultas.documents.NecesidadUrgenteDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.ProductoDonado;
 import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
 import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
-import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
@@ -48,7 +46,6 @@ class EventosDeDonacionesTest {
   @Mock private DonadorDocumentRepository donadorRepository;
   @Mock private NecesidadDocumentRepository necesidadRepository;
   @Mock private DepositoDocumentRepository depositoRepository;
-  @Mock private CalidadDonacionRepository calidadRepository;
   @Mock private AsignacionDocumentRepository asignacionRepository;
   @Mock private EventoProcesadoRepository eventosProcesados;
   @Mock private DonacionDocumentRepository donacionRepository;
@@ -57,7 +54,7 @@ class EventosDeDonacionesTest {
 
   @BeforeEach
   void preparar() {
-    servicio = new EventProcessingService(donadorRepository, necesidadRepository, depositoRepository, calidadRepository);
+    servicio = new EventProcessingService(donadorRepository, necesidadRepository, depositoRepository);
     ReflectionTestUtils.setField(servicio, "asignacionRepository", asignacionRepository);
     ReflectionTestUtils.setField(servicio, "eventosProcesados", eventosProcesados);
     ReflectionTestUtils.setField(servicio, "donacionRepository", donacionRepository);
@@ -108,12 +105,10 @@ class EventosDeDonacionesTest {
   }
 
   @Test
-  @SuppressWarnings({"unchecked", "rawtypes"})
   void alPasarAQuejaLaDonacionSeMueveDeEstadoYNoSeCuentaDosVeces() {
     DonacionDocument existente = documento("INGRESADA");
     when(donacionRepository.findById("don-1")).thenReturn(Optional.of(existente));
     when(donacionRepository.findByDonadorId("d1")).thenReturn(List.of(existente));
-    when(donacionRepository.findAll()).thenReturn(List.of(existente));
 
     servicio.procesar(evento("e2", "DONACION_ESTADO_MODIFICADO", T0.plusSeconds(600), donacion("CONQUEJA")));
 
@@ -123,13 +118,13 @@ class EventosDeDonacionesTest {
     assertEquals(1, donador.getValue().getDonacionesPorEstado().get("CONQUEJA"));
     assertEquals(T0, existente.getFechaIngreso(), "el ingreso es el de la primera vez que se informó");
 
-    ArgumentCaptor<Iterable> calidad = ArgumentCaptor.forClass(Iterable.class);
-    verify(calidadRepository).saveAll(calidad.capture());
-    CalidadDonacionDocument cal = ((Iterable<CalidadDonacionDocument>) calidad.getValue()).iterator().next();
-    assertEquals("alimentos_arroz", cal.getId());
-    assertEquals(1, cal.getTotalDonaciones());
-    assertEquals(1, cal.getDonacionesConQueja());
-    assertEquals(1.0, cal.getProporcionQuejas());
+    // La calidad (consulta 4) ya no se guarda: la calcula el pipeline sobre la donación guardada, que queda
+    // CONQUEJA con la categoría y la subcategoría de su producto.
+    ArgumentCaptor<DonacionDocument> guardada = ArgumentCaptor.forClass(DonacionDocument.class);
+    verify(donacionRepository).save(guardada.capture());
+    assertEquals("CONQUEJA", guardada.getValue().getEstado());
+    assertEquals("alimentos", guardada.getValue().getProductos().get(0).getCategoriaId());
+    assertEquals("arroz", guardada.getValue().getProductos().get(0).getSubcategoriaId());
   }
 
   @Test

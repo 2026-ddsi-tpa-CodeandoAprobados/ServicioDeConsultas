@@ -1,8 +1,8 @@
 package ar.edu.utn.dds.k3003.consultas.controllers;
 
 import ar.edu.utn.dds.k3003.consultas.documents.*;
-import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.NecesidadDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.service.ConsultaService;
@@ -21,19 +21,19 @@ public class AdminController {
   private final DonadorDocumentRepository donadorRepository;
   private final NecesidadDocumentRepository necesidadRepository;
   private final DepositoDocumentRepository depositoRepository;
-  private final CalidadDonacionRepository calidadRepository;
+  private final DonacionDocumentRepository donacionRepository;
 
   public AdminController(
       ConsultaService consultaService,
       DonadorDocumentRepository donadorRepository,
       NecesidadDocumentRepository necesidadRepository,
       DepositoDocumentRepository depositoRepository,
-      CalidadDonacionRepository calidadRepository) {
+      DonacionDocumentRepository donacionRepository) {
     this.consultaService = consultaService;
     this.donadorRepository = donadorRepository;
     this.necesidadRepository = necesidadRepository;
     this.depositoRepository = depositoRepository;
-    this.calidadRepository = calidadRepository;
+    this.donacionRepository = donacionRepository;
   }
 
   @DeleteMapping("/reset")
@@ -131,19 +131,29 @@ public class AdminController {
 
     depositoRepository.save(dep1);
 
-    // 4. Calidad de lo donado (Consulta 4)
-    CalidadDonacionDocument cal1 =
-        CalidadDonacionDocument.builder()
-            .id("Alimentos_Pastas")
-            .categoriaProducto("Alimentos")
-            .subcategoriaProducto("Pastas")
-            .totalDonaciones(100)
-            .donacionesConQueja(12)
-            .proporcionQuejas(0.12)
-            .ultimaActualizacion(Instant.now())
-            .build();
-
-    calidadRepository.save(cal1);
+    // 4. Calidad de lo donado (Consulta 4): sale del pipeline sobre las donaciones. 25 donaciones de
+    // Alimentos/Pastas, 3 con queja (proporción 0.12).
+    List<DonacionDocument> donaciones = new ArrayList<>();
+    for (int i = 1; i <= 25; i++) {
+      donaciones.add(
+          DonacionDocument.builder()
+              .id("demo-don-" + i)
+              .donadorId(i <= 3 ? "15" : "12")
+              .depositoId("dep-1")
+              .descripcion("Fideos secos 500g")
+              .estado(i <= 3 ? "CONQUEJA" : "ACEPTADA")
+              .productos(
+                  new ArrayList<>(List.of(
+                      ProductoDonado.builder()
+                          .productoId("prod-fideos")
+                          .cantidad(10)
+                          .categoriaId("Alimentos")
+                          .subcategoriaId("Pastas")
+                          .build())))
+              .ultimaActualizacion(Instant.now())
+              .build());
+    }
+    donacionRepository.saveAll(donaciones);
 
     return ResponseEntity.ok(
         Map.of(
@@ -152,6 +162,6 @@ public class AdminController {
             "donadoresCreados", 2,
             "necesidadesCreadas", 1,
             "depositosCreados", 1,
-            "metricasCalidad", 1));
+            "donacionesCreadas", donaciones.size()));
   }
 }

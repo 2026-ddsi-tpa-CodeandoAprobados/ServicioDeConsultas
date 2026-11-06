@@ -5,7 +5,6 @@ import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
 import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository;
-import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.EntidadDocumentRepository;
@@ -28,7 +27,6 @@ public class EventProcessingService {
   private final DonadorDocumentRepository donadorRepository;
   private final NecesidadDocumentRepository necesidadRepository;
   private final DepositoDocumentRepository depositoRepository;
-  private final CalidadDonacionRepository calidadRepository;
 
   // Se inyectan por campo (y son opcionales) para no cambiar el constructor que usan los tests.
   @Autowired(required = false)
@@ -46,12 +44,10 @@ public class EventProcessingService {
   public EventProcessingService(
       DonadorDocumentRepository donadorRepository,
       NecesidadDocumentRepository necesidadRepository,
-      DepositoDocumentRepository depositoRepository,
-      CalidadDonacionRepository calidadRepository) {
+      DepositoDocumentRepository depositoRepository) {
     this.donadorRepository = donadorRepository;
     this.necesidadRepository = necesidadRepository;
     this.depositoRepository = depositoRepository;
-    this.calidadRepository = calidadRepository;
   }
 
   public void procesar(EventoGenerico evento) {
@@ -218,19 +214,8 @@ public class EventProcessingService {
       }
       donadorRepository.save(donador);
     }
-
-    String categoria = (String) queja.get("categoriaProducto");
-    String subcategoria = (String) queja.get("subcategoriaProducto");
-    if (categoria != null) {
-      String key = categoria + "_" + (subcategoria != null ? subcategoria : "general");
-      CalidadDonacionDocument cal = calidadRepository.findById(key)
-          .orElseGet(() -> CalidadDonacionDocument.builder().id(key).categoriaProducto(categoria).subcategoriaProducto(subcategoria).totalDonaciones(0).donacionesConQueja(0).build());
-
-      cal.setDonacionesConQueja(cal.getDonacionesConQueja() + 1);
-      cal.recalcularProporcion();
-      cal.setUltimaActualizacion(evento.getTimestamp());
-      calidadRepository.save(cal);
-    }
+    // La calidad de lo donado (consulta 4) no se toca acá: sale del estado CONQUEJA de cada donación, que
+    // Donaciones publica en DONACION_ESTADO_MODIFICADO cuando Donadores le registra la queja.
   }
 
   // ----- Incentivos -----
@@ -355,7 +340,6 @@ public class EventProcessingService {
         recalcularDonador(existente.getDonadorId());
         recalcularDeposito(existente.getDepositoId());
       });
-      recalcularCalidad();
       return;
     }
 
@@ -375,7 +359,7 @@ public class EventProcessingService {
 
     recalcularDonador(doc.getDonadorId());
     recalcularDeposito(doc.getDepositoId());
-    recalcularCalidad();
+    // La calidad de lo donado (consulta 4) se calcula al consultar, con un pipeline sobre esta colección.
   }
 
   @SuppressWarnings("unchecked")
@@ -448,42 +432,6 @@ public class EventProcessingService {
       deposito.setEntidadesDistintasAtendidas(e.getEntidadesDistintas());
       depositoRepository.save(deposito);
     });
-  }
-
-  /** Proporción de donaciones con queja por categoría y subcategoría, calculada desde todas las donaciones. */
-  private void recalcularCalidad() {
-    if (donacionRepository == null) return;
-    Map<String, CalidadDonacionDocument> acumulado = new LinkedHashMap<>();
-    for (DonacionDocument d : donacionRepository.findAll()) {
-      Set<String> claves = new LinkedHashSet<>();
-      Map<String, String[]> partes = new HashMap<>();
-      for (ProductoDonado p : d.getProductos()) {
-        String categoria = p.getCategoriaId() != null ? p.getCategoriaId() : "SIN_CATEGORIA";
-        String subcategoria = p.getSubcategoriaId() != null ? p.getSubcategoriaId() : "general";
-        String clave = categoria + "_" + subcategoria;
-        claves.add(clave);
-        partes.put(clave, new String[] {categoria, subcategoria});
-      }
-      if (claves.isEmpty()) {
-        claves.add("SIN_CATEGORIA_general");
-        partes.put("SIN_CATEGORIA_general", new String[] {"SIN_CATEGORIA", "general"});
-      }
-      boolean conQueja = "CONQUEJA".equalsIgnoreCase(d.getEstado());
-      for (String clave : claves) {
-        CalidadDonacionDocument cal = acumulado.computeIfAbsent(clave, k -> CalidadDonacionDocument.builder()
-            .id(k).categoriaProducto(partes.get(k)[0]).subcategoriaProducto(partes.get(k)[1])
-            .totalDonaciones(0).donacionesConQueja(0).build());
-        cal.setTotalDonaciones(cal.getTotalDonaciones() + 1);
-        if (conQueja) cal.setDonacionesConQueja(cal.getDonacionesConQueja() + 1);
-      }
-    }
-    Instant ahora = Instant.now();
-    acumulado.values().forEach(cal -> {
-      cal.recalcularProporcion();
-      cal.setUltimaActualizacion(ahora);
-    });
-    calidadRepository.deleteAll();
-    calidadRepository.saveAll(acumulado.values());
   }
 
   /**

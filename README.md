@@ -6,7 +6,7 @@ Microservicio de lectura (CQRS) y consumidor de eventos para el sistema **DonaTr
 - **Persistencia NoSQL (MongoDB)**: Construye y actualiza los documentos de lectura combinados.
 - **Idempotencia y Consistencia Eventual**: Ignora eventos desordenados u obsoletos comparando marcas temporales (`timestamp` vs `ultimaActualizacion`).
 - **Consultas Complejas**: Expone endpoints optimizados para responder las 4 consultas complejas de la consigna sin llamar a los módulos de escritura en tiempo real.
-- **Pipeline de Agregación MongoDB**: Resuelve la consulta de "Donadores con más quejas" utilizando un pipeline de agregación (`$match`, `$sort`).
+- **Pipelines de Agregación MongoDB**: La consulta 4 se resuelve con dos pipelines: la calidad de lo donado sobre `donaciones` (`$unwind`, `$group` por donación y por categoría/subcategoría, `$project`, `$sort`) y el ranking de donadores con más quejas sobre `donadores` (`$match`, `$sort`, `$limit`, `$project`).
 
 ---
 
@@ -18,8 +18,8 @@ Microservicio de lectura (CQRS) y consumidor de eventos para el sistema **DonaTr
 | **Consulta 2** | `/consultas/necesidades-urgentes` | `GET` | **Necesidades urgentes sin cubrir**: lista ordenada por urgencia descendente. Filtros opcionales por query param: `urgenciaMinima`, `tipoNecesidad`, `categoriaProducto`, `subcategoriaProducto`. |
 | **Consulta 3** | `/consultas/depositos` | `GET` | **Estado de los depósitos**: ocupación (stock / capacidad), algoritmo de matchmaking, asignaciones por estado, tiempo promedio de entrega y cantidad de entidades distintas atendidas. |
 | **Consulta 3** | `/consultas/depositos/{id}` | `GET` | Estado de un depósito particular por ID. |
-| **Consulta 4** | `/consultas/calidad-donaciones` | `GET` | **Calidad de lo donado**: proporción de donaciones que terminaron con queja por categoría y subcategoría. Filtro opcional: `categoria`. |
-| **Consulta 4 (Pipeline)** | `/consultas/donadores-con-mas-quejas` | `GET` | **Pipeline de Agregación de MongoDB**: lista los donadores con quejas ordenados descendentemente con su estado y categoría. |
+| **Consulta 4** | `/consultas/calidad-donaciones` | `GET` | **Calidad de lo donado** (pipeline sobre `donaciones`): proporción de donaciones que terminaron con queja (CONQUEJA) por categoría y subcategoría, de mayor a menor. Filtros opcionales: `categoria`, `subcategoria`. Los productos que llegan sin categoría se informan como `SIN_CATEGORIA` / `general`. |
+| **Consulta 4 (Pipeline)** | `/consultas/donadores-con-mas-quejas` | `GET` | **Pipeline de Agregación de MongoDB**: los donadores con más quejas, con `id`, `nombre`, `estado`, `categoria` y `quejasRecibidas`. Parámetro opcional `limite` (por defecto 10, `CONSULTAS_RANKING_LIMITE`). |
 | **Mantenimiento Demo** | `/consultas/admin/reset` | `DELETE` | Borra todas las colecciones en MongoDB para inicializar corridas. |
 | **Demo Seeder** | `/consultas/admin/seed-demo` | `POST` | Precarga los datos de ejemplo del enunciado (Lucía Fernández, depósitos, necesidades). |
 

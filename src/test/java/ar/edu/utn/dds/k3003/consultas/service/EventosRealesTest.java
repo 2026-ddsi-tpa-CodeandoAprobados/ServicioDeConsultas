@@ -13,7 +13,6 @@ import ar.edu.utn.dds.k3003.consultas.documents.EntidadBeneficiadaResumen;
 import ar.edu.utn.dds.k3003.consultas.documents.NecesidadUrgenteDocument;
 import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
 import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
-import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
@@ -50,8 +49,7 @@ class EventosRealesTest {
     asignaciones = MongoEnMemoria.repositorio(AsignacionDocumentRepository.class);
     donaciones = MongoEnMemoria.repositorio(DonacionDocumentRepository.class);
     entidades = MongoEnMemoria.repositorio(EntidadDocumentRepository.class);
-    servicio = new EventProcessingService(donadores, necesidades, depositos,
-        MongoEnMemoria.repositorio(CalidadDonacionRepository.class));
+    servicio = new EventProcessingService(donadores, necesidades, depositos);
     ReflectionTestUtils.setField(servicio, "asignacionRepository", asignaciones);
     ReflectionTestUtils.setField(servicio, "eventosProcesados", MongoEnMemoria.repositorio(EventoProcesadoRepository.class));
     ReflectionTestUtils.setField(servicio, "donacionRepository", donaciones);
@@ -292,6 +290,28 @@ class EventosRealesTest {
     AsignacionDocument a = asignaciones.findById("a1").orElseThrow();
     assertEquals("4", a.getEntidadId());
     assertEquals("Comedor Los Girasoles", a.getEntidadRazonSocial());
+  }
+
+  // ---------------- Consulta 4 (datos que usa el pipeline) ----------------
+
+  @Test
+  void hoyLaDonacionLlegaSinCategoriaYElPipelineLaInformaComoSinCategoria() {
+    procesar(donacion("DONACION_CREADA", "2026-11-06T10:00:00Z", "7", "12", "3", "INGRESADA", "5", 10));
+
+    var producto = donaciones.findById("7").orElseThrow().getProductos().get(0);
+    assertEquals("5", producto.getProductoId());
+    assertEquals(10, producto.getCantidad());
+    assertNull(producto.getCategoriaId());
+    assertNull(producto.getSubcategoriaId());
+  }
+
+  @Test
+  void siDonacionesPublicaLaCategoriaSeGuardaParaElPipeline() {
+    procesar(donacionConCategoria("DONACION_CREADA", "2026-11-06T10:00:00Z", "8", "12", "ACEPTADA", "1", "4"));
+
+    var producto = donaciones.findById("8").orElseThrow().getProductos().get(0);
+    assertEquals("1", producto.getCategoriaId());
+    assertEquals("4", producto.getSubcategoriaId());
   }
 
   @Test

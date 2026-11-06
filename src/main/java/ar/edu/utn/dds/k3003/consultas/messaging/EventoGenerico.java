@@ -31,6 +31,7 @@ public class EventoGenerico implements Serializable {
   private Map<String, Object> insignia;
   private Map<String, Object> mision;
   private Map<String, Object> asignacion;
+  private Map<String, Object> producto;
 
   @Builder.Default private Map<String, Object> extra = new HashMap<>();
 }

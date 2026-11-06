@@ -10,6 +10,7 @@ import ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.NecesidadDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.ProductoDocumentRepository;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -41,6 +42,9 @@ public class EventProcessingService {
 
   @Autowired(required = false)
   private EntidadDocumentRepository entidadRepository;
+
+  @Autowired(required = false)
+  private ProductoDocumentRepository productoRepository;
 
   /** Sin Spring (tests) se cuentan en memoria; con Spring se reemplaza por el bean que exporta a Datadog. */
   private ConsultasMetrics metricas = ConsultasMetrics.enMemoria();
@@ -102,6 +106,8 @@ public class EventProcessingService {
         handleBaseLimpiadaIncentivos(evento);
       } else if (tipo.equals("DONADORES_TODOS_ELIMINADOS")) {
         handleDonadoresTodosEliminados();
+      } else if (tipo.startsWith("PRODUCTO_")) {
+        handleProducto(evento);
       } else if (tipo.startsWith("ENTIDAD")) {
         handleEntidad(evento);
       } else if (tipo.contains("DONADOR_CREADO")) {
@@ -410,16 +416,87 @@ public class EventProcessingService {
       for (Object item : items) {
         if (item instanceof Map<?, ?> m) {
           Map<String, Object> p = (Map<String, Object>) m;
-          productos.add(ProductoDonado.builder()
+          ProductoDonado donado = ProductoDonado.builder()
               .productoId(texto(p, "productoID", "productoId"))
               .cantidad(numero(p, "cantidadProducto", "cantidad"))
-              .categoriaId(texto(p, "categoriaID", "categoriaId", "categoria"))
-              .subcategoriaId(texto(p, "subcategoriaID", "subcategoriaId", "subcategoria"))
-              .build());
+              .categoriaId(texto(p, "categoria", "categoriaNombre", "categoriaID", "categoriaId"))
+              .subcategoriaId(texto(p, "subcategoria", "subcategoriaNombre", "subcategoriaID", "subcategoriaId"))
+              .build();
+          clasificarConElProducto(donado);
+          productos.add(donado);
         }
       }
     }
     return productos;
+  }
+
+  /**
+   * Eventos de producto de Donaciones (PRODUCTO_CREADO, PRODUCTO_MODIFICADO, PRODUCTO_ELIMINADO): traen la
+   * subcategoría y la categoría del producto. Con eso se clasifican las necesidades de ese producto (para poder
+   * filtrarlas por categoría) y las donaciones que ya lo incluyen (para la proporción de quejas por categoría).
+   */
+  private void handleProducto(EventoGenerico evento) {
+    if (productoRepository == null) {
+      descartar(MOTIVO_CATALOGO);
+      return;
+    }
+    Map<String, Object> datos = evento.getProducto() != null ? evento.getProducto() : evento.getExtra();
+    String productoId = evento.getIdReferencia() != null ? evento.getIdReferencia() : texto(datos, "id");
+    if (productoId == null) {
+      descartar(MOTIVO_INVALIDO);
+      return;
+    }
+
+    if (evento.getTipo().toUpperCase().contains("ELIMINADO")) {
+      productoRepository.deleteById(productoId);
+      return;
+    }
+
+    ProductoDocument doc = productoRepository.findById(productoId)
+        .orElseGet(() -> ProductoDocument.builder().id(productoId).build());
+    if (noEsMasNuevo(doc.getUltimaActualizacion(), evento)) return;
+    doc.setNombre(texto(datos, "nombre"));
+    doc.setCategoriaId(texto(datos, "categoriaID", "categoriaId"));
+    doc.setCategoria(texto(datos, "categoria"));
+    doc.setSubcategoriaId(texto(datos, "subcategoriaID", "subcategoriaId"));
+    doc.setSubcategoria(texto(datos, "subcategoria"));
+    doc.setUltimaActualizacion(evento.getTimestamp());
+    productoRepository.save(doc);
+
+    for (NecesidadUrgenteDocument necesidad : necesidadRepository.findByProductoSolicitadoId(productoId)) {
+      aplicarProducto(necesidad, doc);
+      necesidadRepository.save(necesidad);
+    }
+    if (donacionRepository != null) {
+      for (DonacionDocument donacion : donacionRepository.findByProductosProductoId(productoId)) {
+        for (ProductoDonado donado : donacion.getProductos()) {
+          if (productoId.equals(donado.getProductoId())) {
+            if (doc.etiquetaCategoria() != null) donado.setCategoriaId(doc.etiquetaCategoria());
+            if (doc.etiquetaSubcategoria() != null) donado.setSubcategoriaId(doc.etiquetaSubcategoria());
+          }
+        }
+        donacionRepository.save(donacion);
+      }
+    }
+  }
+
+  /** Copia el nombre y la clasificación del producto a la necesidad (solo lo que el producto sabe). */
+  private static void aplicarProducto(NecesidadUrgenteDocument necesidad, ProductoDocument producto) {
+    if (producto.getNombre() != null) necesidad.setProductoNombre(producto.getNombre());
+    if (producto.etiquetaCategoria() != null) necesidad.setCategoriaProducto(producto.etiquetaCategoria());
+    if (producto.etiquetaSubcategoria() != null) necesidad.setSubcategoriaProducto(producto.etiquetaSubcategoria());
+  }
+
+  /** Si el detalle de la donación no trae categoría o subcategoría, se usa la del producto si ya se conoce. */
+  private void clasificarConElProducto(ProductoDonado donado) {
+    if ((donado.getCategoriaId() != null && donado.getSubcategoriaId() != null)
+        || productoRepository == null || donado.getProductoId() == null) {
+      return;
+    }
+    productoRepository.findById(donado.getProductoId()).ifPresent(conocido -> {
+      if (donado.getCategoriaId() == null) donado.setCategoriaId(conocido.etiquetaCategoria());
+      if (donado.getSubcategoriaId() == null) donado.setSubcategoriaId(conocido.etiquetaSubcategoria());
+    });
   }
 
   /** Donaciones por estado y entidades beneficiadas de un donador, calculadas desde sus donaciones. */
@@ -508,6 +585,9 @@ public class EventProcessingService {
     if (texto(nec, "productoNombre") != null) doc.setProductoNombre(texto(nec, "productoNombre"));
     if (texto(nec, "categoriaProducto") != null) doc.setCategoriaProducto(texto(nec, "categoriaProducto"));
     if (texto(nec, "subcategoriaProducto") != null) doc.setSubcategoriaProducto(texto(nec, "subcategoriaProducto"));
+    if (productoRepository != null && doc.getProductoSolicitadoId() != null) {
+      productoRepository.findById(doc.getProductoSolicitadoId()).ifPresent(p -> aplicarProducto(doc, p));
+    }
     String razonSocial = texto(nec, "entidadRazonSocial");
     doc.setEntidadRazonSocial(razonSocial != null ? razonSocial : razonSocialDe(doc.getEntidadId(), doc.getEntidadRazonSocial()));
 

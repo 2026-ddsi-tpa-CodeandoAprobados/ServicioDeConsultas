@@ -11,4 +11,6 @@ public interface DonacionDocumentRepository extends MongoRepository<DonacionDocu
   List<DonacionDocument> findByDonadorId(String donadorId);
 
   List<DonacionDocument> findByDepositoId(String depositoId);
+
+  List<DonacionDocument> findByProductosProductoId(String productoId);
 }

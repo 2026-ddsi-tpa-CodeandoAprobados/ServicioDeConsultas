@@ -1,0 +1,157 @@
+package ar.edu.utn.dds.k3003.consultas.controllers;
+
+import ar.edu.utn.dds.k3003.consultas.documents.*;
+import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.NecesidadDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.service.ConsultaService;
+import java.time.Instant;
+import java.util.*;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@Slf4j
+@RestController
+@RequestMapping("/consultas/admin")
+public class AdminController {
+
+  private final ConsultaService consultaService;
+  private final DonadorDocumentRepository donadorRepository;
+  private final NecesidadDocumentRepository necesidadRepository;
+  private final DepositoDocumentRepository depositoRepository;
+  private final CalidadDonacionRepository calidadRepository;
+
+  public AdminController(
+      ConsultaService consultaService,
+      DonadorDocumentRepository donadorRepository,
+      NecesidadDocumentRepository necesidadRepository,
+      DepositoDocumentRepository depositoRepository,
+      CalidadDonacionRepository calidadRepository) {
+    this.consultaService = consultaService;
+    this.donadorRepository = donadorRepository;
+    this.necesidadRepository = necesidadRepository;
+    this.depositoRepository = depositoRepository;
+    this.calidadRepository = calidadRepository;
+  }
+
+  @DeleteMapping("/reset")
+  public ResponseEntity<Map<String, String>> resetDatabase() {
+    consultaService.borrarTodo();
+    return ResponseEntity.ok(Map.of("mensaje", "Base de datos MongoDB reiniciada con éxito"));
+  }
+
+  /**
+   * Carga datos iniciales para la presentación / demo según los ejemplos de la consigna.
+   */
+  @PostMapping("/seed-demo")
+  public ResponseEntity<Map<String, Object>> seedDemoData() {
+    log.info("Cargando datos de demostración en MongoDB...");
+
+    // 1. Donador de ejemplo del documento (Página 5)
+    DonadorDocument lucia =
+        DonadorDocument.builder()
+            .id("12")
+            .nombre("Lucía Fernández")
+            .estado("VERIFICADO")
+            .categoria("COLABORADOR")
+            .historialCategorias(
+                List.of(
+                    HistorialCategoria.builder().categoria("OCASIONAL").desde("2026-03-02").build(),
+                    HistorialCategoria.builder().categoria("COLABORADOR").desde("2026-06-18").build()))
+            .insignias(List.of("Completitud", "Solidaridad"))
+            .misionEnCurso(
+                MisionEnCurso.builder()
+                    .nombre("Donaciones Exitosas")
+                    .progreso(14)
+                    .objetivo(20)
+                    .build())
+            .donacionesPorEstado(Map.of("INGRESADA", 2, "ACEPTADA", 14, "CONQUEJA", 3, "ENTREGADA", 10))
+            .quejasRecibidas(3)
+            .entidadesBeneficiadas(
+                List.of(
+                    EntidadBeneficiadaResumen.builder()
+                        .entidadId("4")
+                        .razonSocial("Comedor Los Girasoles")
+                        .unidades(120)
+                        .build()))
+            .ultimaActualizacion(Instant.parse("2026-10-20T14:32:10Z"))
+            .build();
+
+    DonadorDocument carlos =
+        DonadorDocument.builder()
+            .id("15")
+            .nombre("Carlos Gómez")
+            .estado("SOSPECHOSO")
+            .categoria("OCASIONAL")
+            .quejasRecibidas(6)
+            .ultimaActualizacion(Instant.now())
+            .build();
+
+    donadorRepository.saveAll(List.of(lucia, carlos));
+
+    // 2. Necesidades Urgentes (Consulta 2)
+    NecesidadUrgenteDocument nec1 =
+        NecesidadUrgenteDocument.builder()
+            .id("nec-fideos-1")
+            .entidadId("4")
+            .entidadRazonSocial("Comedor Los Girasoles")
+            .urgencia(9)
+            .tipoNecesidad("EXTRAORDINARIA")
+            .productoSolicitadoId("prod-fideos")
+            .productoNombre("Fideos secos 500g")
+            .categoriaProducto("Alimentos")
+            .subcategoriaProducto("Pastas")
+            .cantidadObjetivo(200)
+            .cantidadFaltante(80)
+            .unidadesAsignadasPendientes(20)
+            .stockPorDeposito(Map.of("Depósito Medrano", 50, "Depósito Campus", 30))
+            .satisfecha(false)
+            .ultimaActualizacion(Instant.now())
+            .build();
+
+    necesidadRepository.save(nec1);
+
+    // 3. Depósitos (Consulta 3)
+    DepositoDocument dep1 =
+        DepositoDocument.builder()
+            .id("dep-1")
+            .nombre("Depósito Central Medrano")
+            .capacidadTotal(1000)
+            .stockActual(750)
+            .ocupacionPorcentaje(75.0)
+            .algoritmoMatchmaking("FIFO")
+            .asignacionesPorEstado(Map.of("PENDIENTE", 3, "EN_VIAJE", 5, "ENTREGADA", 42))
+            .tiempoPromedioEntregaMinutos(145.5)
+            .entidadesDistintasAtendidas(Set.of("entidad-1", "entidad-4", "entidad-8"))
+            .cantidadEntidadesDistintas(3)
+            .ultimaActualizacion(Instant.now())
+            .build();
+
+    depositoRepository.save(dep1);
+
+    // 4. Calidad de lo donado (Consulta 4)
+    CalidadDonacionDocument cal1 =
+        CalidadDonacionDocument.builder()
+            .id("Alimentos_Pastas")
+            .categoriaProducto("Alimentos")
+            .subcategoriaProducto("Pastas")
+            .totalDonaciones(100)
+            .donacionesConQueja(12)
+            .proporcionQuejas(0.12)
+            .ultimaActualizacion(Instant.now())
+            .build();
+
+    calidadRepository.save(cal1);
+
+    return ResponseEntity.ok(
+        Map.of(
+            "status", "OK",
+            "mensaje", "Datos de demostración precargados exitosamente",
+            "donadoresCreados", 2,
+            "necesidadesCreadas", 1,
+            "depositosCreados", 1,
+            "metricasCalidad", 1));
+  }
+}

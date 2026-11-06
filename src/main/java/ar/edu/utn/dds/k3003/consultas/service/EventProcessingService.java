@@ -2,6 +2,7 @@ package ar.edu.utn.dds.k3003.consultas.service;
 
 import ar.edu.utn.dds.k3003.consultas.documents.*;
 import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
+import ar.edu.utn.dds.k3003.consultas.metrics.ConsultasMetrics;
 import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository;
@@ -41,6 +42,27 @@ public class EventProcessingService {
   @Autowired(required = false)
   private EntidadDocumentRepository entidadRepository;
 
+  /** Sin Spring (tests) se cuentan en memoria; con Spring se reemplaza por el bean que exporta a Datadog. */
+  private ConsultasMetrics metricas = ConsultasMetrics.enMemoria();
+
+  static final String MOTIVO_REPETIDO = "repetido";
+  static final String MOTIVO_OBSOLETO = "obsoleto";
+  static final String MOTIVO_NO_MAPEADO = "no_mapeado";
+  static final String MOTIVO_CATALOGO = "catalogo";
+  static final String MOTIVO_INVALIDO = "invalido";
+
+  /**
+   * Por qué el handler no aplicó el evento que se está procesando (null si lo aplicó). Lo marcan los
+   * handlers con {@link #descartar} y lo lee {@link #procesar} para contar procesados e ignorados sin cambiar
+   * la firma de cada handler. Es por hilo porque el listener puede tener varios consumidores.
+   */
+  private static final ThreadLocal<String> DESCARTE = new ThreadLocal<>();
+
+  @Autowired(required = false)
+  void setMetricas(ConsultasMetrics metricas) {
+    this.metricas = metricas;
+  }
+
   public EventProcessingService(
       DonadorDocumentRepository donadorRepository,
       NecesidadDocumentRepository necesidadRepository,
@@ -52,17 +74,22 @@ public class EventProcessingService {
 
   public void procesar(EventoGenerico evento) {
     if (evento == null || evento.getTipo() == null) {
+      metricas.eventoRecibido(null);
+      metricas.eventoIgnorado(null, MOTIVO_INVALIDO);
       return;
     }
 
     String tipo = evento.getTipo().toUpperCase();
+    metricas.eventoRecibido(tipo);
     if (yaProcesado(evento)) {
       log.info("Evento repetido '{}' [ID: {}], se ignora", tipo, evento.getId());
+      metricas.eventoIgnorado(tipo, MOTIVO_REPETIDO);
       return;
     }
     log.info("Procesando evento CQRS '{}' para referencia '{}' [ID: {}]", tipo, evento.getIdReferencia(), evento.getId());
 
     try {
+      DESCARTE.remove();
       if (tipo.equals("DONADOR_ACTUALIZADO")) {
         handleDonadorActualizado(evento);
       } else if (tipo.startsWith("INSIGNIA_") || tipo.startsWith("MISION_")) {
@@ -70,6 +97,7 @@ public class EventProcessingService {
         // completo en DONADOR_ACTUALIZADO.
         log.info("Evento de catálogo de Incentivos '{}' [{}] ignorado: no modifica donadores",
             tipo, evento.getIdReferencia());
+        descartar(MOTIVO_CATALOGO);
       } else if (tipo.equals("BASE_LIMPIADA") && ORIGEN_INCENTIVOS.equalsIgnoreCase(evento.getIdReferencia())) {
         handleBaseLimpiadaIncentivos(evento);
       } else if (tipo.equals("DONADORES_TODOS_ELIMINADOS")) {
@@ -102,10 +130,20 @@ public class EventProcessingService {
         handleDeposito(evento);
       } else {
         log.warn("Evento no mapeado explícitamente: {}", tipo);
+        descartar(MOTIVO_NO_MAPEADO);
       }
       marcarProcesado(evento);
+      String motivo = DESCARTE.get();
+      if (motivo == null) {
+        metricas.eventoProcesado(tipo);
+      } else {
+        metricas.eventoIgnorado(tipo, motivo);
+      }
     } catch (Exception e) {
       log.error("Error al procesar evento '{}' en MongoDB: {}", tipo, e.getMessage(), e);
+      metricas.errorDeProcesamiento(tipo);
+    } finally {
+      DESCARTE.remove();
     }
   }
 
@@ -201,13 +239,14 @@ public class EventProcessingService {
       String quejaId = texto(queja, "id");
       if (quejaId != null && donador.getQuejaIds().contains(quejaId)) {
         log.info("Queja '{}' ya contada para el donador '{}' [ID: {}], se ignora", quejaId, donadorId, evento.getId());
+        descartar(MOTIVO_REPETIDO);
         return;
       }
       if (quejaId != null) donador.getQuejaIds().add(quejaId);
 
       int q = (donador.getQuejasRecibidas() != null ? donador.getQuejasRecibidas() : 0) + 1;
       donador.setQuejasRecibidas(q);
-      if (!esObsoleto(donador.getUltimaActualizacion(), evento)) {
+      if (!esAnterior(donador.getUltimaActualizacion(), evento)) {
         if (q == 10) donador.setEstado("BANEADO");
         else if (q == 5) donador.setEstado("SOSPECHOSO");
         donador.setUltimaActualizacion(evento.getTimestamp());
@@ -229,6 +268,7 @@ public class EventProcessingService {
     Map<String, Object> data = evento.getDonador();
     if (data == null) {
       log.warn("DONADOR_ACTUALIZADO sin el campo 'donador' [ID: {}], se ignora", evento.getId());
+      descartar(MOTIVO_INVALIDO);
       return;
     }
     String donadorId = evento.getIdReferencia() != null ? evento.getIdReferencia() : texto(data, "id");
@@ -472,7 +512,7 @@ public class EventProcessingService {
     doc.setEntidadRazonSocial(razonSocial != null ? razonSocial : razonSocialDe(doc.getEntidadId(), doc.getEntidadRazonSocial()));
 
     Integer cantidad = numero(nec, "cantidadObjetivo");
-    if (!esObsoleto(doc.getUltimaActualizacion(), evento)) {
+    if (!esAnterior(doc.getUltimaActualizacion(), evento)) {
       if (cantidad != null) {
         doc.setCantidadObjetivo(cantidad);
         doc.setCantidadFaltante(cantidad);
@@ -831,9 +871,11 @@ public class EventProcessingService {
 
   /** Igual o más viejo que lo guardado: no aporta nada (cubre repetidos y desordenados). */
   private boolean noEsMasNuevo(Instant ultimaActualizacion, EventoGenerico evento) {
-    return ultimaActualizacion != null
+    boolean noAporta = ultimaActualizacion != null
         && evento.getTimestamp() != null
         && !evento.getTimestamp().isAfter(ultimaActualizacion);
+    if (noAporta) descartar(MOTIVO_OBSOLETO);
+    return noAporta;
   }
 
   // ----- lectura segura de los mapas que llegan en el evento -----
@@ -869,9 +911,25 @@ public class EventProcessingService {
     return LocalDate.ofInstant(cuando, ZoneOffset.UTC).toString();
   }
 
+  /** Más viejo que lo guardado: se descarta (y se cuenta como ignorado por obsoleto). */
   private boolean esObsoleto(java.time.Instant ultimaActualizacion, EventoGenerico evento) {
+    boolean obsoleto = esAnterior(ultimaActualizacion, evento);
+    if (obsoleto) descartar(MOTIVO_OBSOLETO);
+    return obsoleto;
+  }
+
+  /**
+   * Solo compara: para los handlers que, con un evento atrasado, igual aplican una parte (la queja se cuenta
+   * aunque no cambie el estado; la necesidad completa sus datos de alta aunque no toque las cantidades).
+   */
+  private static boolean esAnterior(Instant ultimaActualizacion, EventoGenerico evento) {
     return ultimaActualizacion != null
         && evento.getTimestamp() != null
         && ultimaActualizacion.isAfter(evento.getTimestamp());
+  }
+
+  /** El evento que se está procesando no se aplicó; {@link #procesar} lo cuenta como ignorado. */
+  private static void descartar(String motivo) {
+    DESCARTE.set(motivo);
   }
 }

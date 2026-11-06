@@ -39,6 +39,27 @@ Microservicio de lectura (CQRS) y consumidor de eventos para el sistema **DonaTr
 | `RABBITMQ_EXCHANGE` | Exchange de eventos | `donatrack.exchange` |
 | `RABBITMQ_QUEUE` | Cola consumida por este worker | `consultas.mongo.queue` |
 | `RABBITMQ_ROUTING_KEY` | Patrón de routing keys a consumir | `#` (todos los eventos) |
+| `CONSULTAS_RANKING_LIMITE` | Cuántos donadores devuelve `/consultas/donadores-con-mas-quejas` sin `?limite=` | `10` |
+| `DD_ENABLED` | Exporta las métricas a Datadog | `false` |
+| `DD_API_KEY` | Clave de la API de Datadog. **Nunca** se escribe en el repo: solo como variable de entorno (en Render, como secreto). | *(vacía)* |
+| `DD_URI` | URL de la API de Datadog (otra región, p. ej. `https://api.us5.datadoghq.com`) | `https://api.datadoghq.com` |
+| `DD_STEP` | Cada cuánto se envían las métricas | `30s` |
+
+---
+
+## Métricas
+
+Micrometer con el registro de Datadog. Todas las métricas llevan la etiqueta `application:consultas`.
+
+| Métrica | Etiquetas | Qué cuenta |
+| :--- | :--- | :--- |
+| `consultas.eventos.recibidos` | `tipo` | Cada evento que llega a la cola. |
+| `consultas.eventos.procesados` | `tipo` | Eventos que modificaron el modelo de lectura. |
+| `consultas.eventos.ignorados` | `tipo`, `motivo` | Eventos que no cambiaron nada: `repetido` (mismo id de evento o misma queja), `obsoleto` (más viejo que lo guardado), `no_mapeado`, `catalogo` (insignias y misiones de Incentivos), `invalido`. |
+| `consultas.eventos.errores` | `tipo` | Excepciones al procesar un evento (el evento se descarta igual que antes). |
+| `consultas.requests` | `endpoint`, `metodo` | Pedidos a cada endpoint de `/consultas/**`, por patrón de ruta. |
+
+`tipo` toma solo los tipos que publican los módulos; cualquier otro se informa como `OTRO`. Para enviarlas: `DD_ENABLED=true` y `DD_API_KEY=<clave>`. Activo y sin clave, la app arranca igual pero los envíos fallan.
 
 ---
 

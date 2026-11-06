@@ -36,6 +36,9 @@ public class ConsultaService {
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   private ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository eventosProcesados;
 
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository donacionRepository;
+
   public ConsultaService(
       DonadorDocumentRepository donadorRepository,
       NecesidadDocumentRepository necesidadRepository,
@@ -135,5 +138,31 @@ public class ConsultaService {
     calidadRepository.deleteAll();
     if (asignacionRepository != null) asignacionRepository.deleteAll();
     if (eventosProcesados != null) eventosProcesados.deleteAll();
+    if (donacionRepository != null) donacionRepository.deleteAll();
+  }
+
+  /**
+   * Consulta 3 con rango de fechas: el tiempo promedio de entrega y las entidades atendidas se calculan
+   * solo con las entregas del rango. Sin rango, es lo mismo que el estado guardado.
+   */
+  public List<DepositoDocument> obtenerEstadoDepositosEnRango(
+      String depositoId, java.time.Instant desde, java.time.Instant hasta) {
+    List<DepositoDocument> depositos = depositoId != null
+        ? depositoRepository.findById(depositoId).map(List::of).orElse(List.of())
+        : depositoRepository.findAll();
+    if (donacionRepository == null || asignacionRepository == null) return depositos;
+    for (DepositoDocument deposito : depositos) {
+      List<ar.edu.utn.dds.k3003.consultas.documents.DonacionDocument> donaciones =
+          donacionRepository.findByDepositoId(deposito.getId());
+      List<ar.edu.utn.dds.k3003.consultas.documents.AsignacionDocument> asignaciones = donaciones.isEmpty()
+          ? List.of()
+          : asignacionRepository.findByDonacionIdIn(
+              donaciones.stream().map(ar.edu.utn.dds.k3003.consultas.documents.DonacionDocument::getId).toList());
+      EstadisticasDeposito estadisticas = EstadisticasDeposito.calcular(donaciones, asignaciones, desde, hasta);
+      deposito.setAsignacionesPorEstado(estadisticas.getAsignacionesPorEstado());
+      deposito.setTiempoPromedioEntregaMinutos(estadisticas.getTiempoPromedioEntregaMinutos());
+      deposito.setEntidadesDistintasAtendidas(estadisticas.getEntidadesDistintas());
+    }
+    return depositos;
   }
 }

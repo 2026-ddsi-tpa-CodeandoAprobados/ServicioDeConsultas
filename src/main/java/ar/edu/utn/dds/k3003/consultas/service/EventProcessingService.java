@@ -3,6 +3,7 @@ package ar.edu.utn.dds.k3003.consultas.service;
 import ar.edu.utn.dds.k3003.consultas.documents.*;
 import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
 import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
@@ -30,6 +31,9 @@ public class EventProcessingService {
 
   @Autowired(required = false)
   private EventoProcesadoRepository eventosProcesados;
+
+  @Autowired(required = false)
+  private DonacionDocumentRepository donacionRepository;
 
   public EventProcessingService(
       DonadorDocumentRepository donadorRepository,
@@ -228,44 +232,153 @@ public class EventProcessingService {
     }
   }
 
+  /**
+   * Donaciones publica DONACION_CREADA, DONACION_ESTADO_MODIFICADO y DONACION_ELIMINADA con la donación
+   * completa. Cada donación se guarda en su propio documento y los conteos se recalculan desde ahí, de modo
+   * que un cambio de estado mueve la donación de un estado a otro y no la cuenta dos veces.
+   */
   private void handleDonacion(EventoGenerico evento) {
+    if (donacionRepository == null) return;
     Map<String, Object> don = evento.getDonacion() != null ? evento.getDonacion() : evento.getExtra();
-    String donadorId = (String) don.get("donadorId");
-    String estadoDonacion = (String) don.get("estado");
+    String id = evento.getIdReferencia() != null ? evento.getIdReferencia() : texto(don, "id");
+    if (id == null) return;
+    String tipo = evento.getTipo().toUpperCase();
 
-    if (donadorId != null && estadoDonacion != null) {
-      DonadorDocument donador = donadorRepository.findById(donadorId)
-          .orElseGet(() -> DonadorDocument.builder().id(donadorId).build());
+    if (tipo.contains("ELIMINADA")) {
+      donacionRepository.findById(id).ifPresent(existente -> {
+        donacionRepository.deleteById(id);
+        recalcularDonador(existente.getDonadorId());
+        recalcularDeposito(existente.getDepositoId());
+      });
+      recalcularCalidad();
+      return;
+    }
 
-      int count = donador.getDonacionesPorEstado().getOrDefault(estadoDonacion, 0) + 1;
-      donador.getDonacionesPorEstado().put(estadoDonacion, count);
+    DonacionDocument doc = donacionRepository.findById(id).orElseGet(() -> DonacionDocument.builder().id(id).build());
+    if (noEsMasNuevo(doc.getUltimaActualizacion(), evento)) return;
 
-      if ("ENTREGADA".equalsIgnoreCase(estadoDonacion) && don.containsKey("entidadId")) {
-        String entId = (String) don.get("entidadId");
-        String razon = (String) don.get("entidadRazonSocial");
-        Integer unidades = don.get("unidades") instanceof Number n ? n.intValue() : 1;
+    doc.setDonadorId(texto(don, "donadorID", "donadorId"));
+    doc.setDepositoId(texto(don, "depositoID", "depositoId"));
+    doc.setDescripcion(texto(don, "descripcion"));
+    doc.setEstado(texto(don, "estado"));
+    doc.setFechaRegistro(texto(don, "fechaRegistro"));
+    if (doc.getFechaIngreso() == null) doc.setFechaIngreso(evento.getTimestamp());
+    doc.setProductos(productosDe(don));
+    doc.setUltimaActualizacion(evento.getTimestamp());
+    donacionRepository.save(doc);
+    log.info("Donación guardada en MongoDB: {} ({})", id, doc.getEstado());
 
-        donador.getEntidadesBeneficiadas().add(
-            EntidadBeneficiadaResumen.builder().entidadId(entId).razonSocial(razon).unidades(unidades).build()
-        );
+    recalcularDonador(doc.getDonadorId());
+    recalcularDeposito(doc.getDepositoId());
+    recalcularCalidad();
+  }
+
+  @SuppressWarnings("unchecked")
+  private List<ProductoDonado> productosDe(Map<String, Object> don) {
+    Object lista = don.get("detallesProductosDTO") != null ? don.get("detallesProductosDTO") : don.get("productos");
+    List<ProductoDonado> productos = new ArrayList<>();
+    if (lista instanceof List<?> items) {
+      for (Object item : items) {
+        if (item instanceof Map<?, ?> m) {
+          Map<String, Object> p = (Map<String, Object>) m;
+          productos.add(ProductoDonado.builder()
+              .productoId(texto(p, "productoID", "productoId"))
+              .cantidad(numero(p, "cantidadProducto", "cantidad"))
+              .categoriaId(texto(p, "categoriaID", "categoriaId", "categoria"))
+              .subcategoriaId(texto(p, "subcategoriaID", "subcategoriaId", "subcategoria"))
+              .build());
+        }
       }
-
-      donador.setUltimaActualizacion(evento.getTimestamp());
-      donadorRepository.save(donador);
     }
+    return productos;
+  }
 
-    String categoria = (String) don.get("categoriaProducto");
-    String subcategoria = (String) don.get("subcategoriaProducto");
-    if (categoria != null) {
-      String key = categoria + "_" + (subcategoria != null ? subcategoria : "general");
-      CalidadDonacionDocument cal = calidadRepository.findById(key)
-          .orElseGet(() -> CalidadDonacionDocument.builder().id(key).categoriaProducto(categoria).subcategoriaProducto(subcategoria).totalDonaciones(0).donacionesConQueja(0).build());
+  /** Donaciones por estado y entidades beneficiadas de un donador, calculadas desde sus donaciones. */
+  private void recalcularDonador(String donadorId) {
+    if (donadorId == null || donacionRepository == null) return;
+    DonadorDocument donador = donadorRepository.findById(donadorId)
+        .orElseGet(() -> DonadorDocument.builder().id(donadorId).build());
+    List<DonacionDocument> donaciones = donacionRepository.findByDonadorId(donadorId);
 
-      cal.setTotalDonaciones(cal.getTotalDonaciones() + 1);
+    Map<String, Integer> porEstado = new LinkedHashMap<>();
+    porEstado.put("INGRESADA", 0);
+    porEstado.put("ACEPTADA", 0);
+    porEstado.put("CONQUEJA", 0);
+    for (DonacionDocument d : donaciones) {
+      if (d.getEstado() != null) porEstado.merge(d.getEstado().toUpperCase(), 1, Integer::sum);
+    }
+    donador.setDonacionesPorEstado(porEstado);
+
+    if (asignacionRepository != null) {
+      Map<String, Integer> unidades = new LinkedHashMap<>();
+      Map<String, String> razones = new HashMap<>();
+      if (!donaciones.isEmpty()) {
+        List<String> ids = donaciones.stream().map(DonacionDocument::getId).toList();
+        for (AsignacionDocument a : asignacionRepository.findByDonacionIdIn(ids)) {
+          if ("COMPLETADA".equalsIgnoreCase(a.getEstado()) && a.getEntidadId() != null) {
+            unidades.merge(a.getEntidadId(), a.getCantidad() == null ? 0 : a.getCantidad(), Integer::sum);
+            if (a.getEntidadRazonSocial() != null) razones.put(a.getEntidadId(), a.getEntidadRazonSocial());
+          }
+        }
+      }
+      List<EntidadBeneficiadaResumen> beneficiadas = new ArrayList<>();
+      unidades.forEach((entidad, total) -> beneficiadas.add(EntidadBeneficiadaResumen.builder()
+          .entidadId(entidad).razonSocial(razones.get(entidad)).unidades(total).build()));
+      donador.setEntidadesBeneficiadas(beneficiadas);
+    }
+    donadorRepository.save(donador);
+  }
+
+  /** Asignaciones por estado, tiempo promedio de entrega y entidades atendidas de un depósito. */
+  private void recalcularDeposito(String depositoId) {
+    if (depositoId == null || donacionRepository == null || asignacionRepository == null) return;
+    depositoRepository.findById(depositoId).ifPresent(deposito -> {
+      List<DonacionDocument> donaciones = donacionRepository.findByDepositoId(depositoId);
+      List<AsignacionDocument> asignaciones = donaciones.isEmpty()
+          ? List.of()
+          : asignacionRepository.findByDonacionIdIn(donaciones.stream().map(DonacionDocument::getId).toList());
+      EstadisticasDeposito e = EstadisticasDeposito.calcular(donaciones, asignaciones, null, null);
+      deposito.setAsignacionesPorEstado(e.getAsignacionesPorEstado());
+      deposito.setTiempoPromedioEntregaMinutos(e.getTiempoPromedioEntregaMinutos());
+      deposito.setEntidadesDistintasAtendidas(e.getEntidadesDistintas());
+      depositoRepository.save(deposito);
+    });
+  }
+
+  /** Proporción de donaciones con queja por categoría y subcategoría, calculada desde todas las donaciones. */
+  private void recalcularCalidad() {
+    if (donacionRepository == null) return;
+    Map<String, CalidadDonacionDocument> acumulado = new LinkedHashMap<>();
+    for (DonacionDocument d : donacionRepository.findAll()) {
+      Set<String> claves = new LinkedHashSet<>();
+      Map<String, String[]> partes = new HashMap<>();
+      for (ProductoDonado p : d.getProductos()) {
+        String categoria = p.getCategoriaId() != null ? p.getCategoriaId() : "SIN_CATEGORIA";
+        String subcategoria = p.getSubcategoriaId() != null ? p.getSubcategoriaId() : "general";
+        String clave = categoria + "_" + subcategoria;
+        claves.add(clave);
+        partes.put(clave, new String[] {categoria, subcategoria});
+      }
+      if (claves.isEmpty()) {
+        claves.add("SIN_CATEGORIA_general");
+        partes.put("SIN_CATEGORIA_general", new String[] {"SIN_CATEGORIA", "general"});
+      }
+      boolean conQueja = "CONQUEJA".equalsIgnoreCase(d.getEstado());
+      for (String clave : claves) {
+        CalidadDonacionDocument cal = acumulado.computeIfAbsent(clave, k -> CalidadDonacionDocument.builder()
+            .id(k).categoriaProducto(partes.get(k)[0]).subcategoriaProducto(partes.get(k)[1])
+            .totalDonaciones(0).donacionesConQueja(0).build());
+        cal.setTotalDonaciones(cal.getTotalDonaciones() + 1);
+        if (conQueja) cal.setDonacionesConQueja(cal.getDonacionesConQueja() + 1);
+      }
+    }
+    Instant ahora = Instant.now();
+    acumulado.values().forEach(cal -> {
       cal.recalcularProporcion();
-      cal.setUltimaActualizacion(evento.getTimestamp());
-      calidadRepository.save(cal);
-    }
+      cal.setUltimaActualizacion(ahora);
+    });
+    calidadRepository.deleteAll();
+    calidadRepository.saveAll(acumulado.values());
   }
 
   private void handleNecesidadRegistrada(EventoGenerico evento) {
@@ -429,13 +542,22 @@ public class EventProcessingService {
     doc.setFechaAsignacion(instante(a, "fechaAsignacion"));
     doc.setFechaEntrega(instante(a, "fechaEntrega"));
     if (doc.getNecesidadId() != null) {
-      necesidadRepository.findById(doc.getNecesidadId()).ifPresent(n -> doc.setEntidadId(n.getEntidadId()));
+      necesidadRepository.findById(doc.getNecesidadId()).ifPresent(n -> {
+        doc.setEntidadId(n.getEntidadId());
+        doc.setEntidadRazonSocial(n.getEntidadRazonSocial());
+      });
     }
     doc.setUltimaActualizacion(evento.getTimestamp());
     asignacionRepository.save(doc);
     log.info("Asignación guardada en MongoDB: {} ({})", id, doc.getEstado());
 
     actualizarPendientesDeLaNecesidad(doc.getNecesidadId());
+    if (donacionRepository != null && doc.getDonacionId() != null) {
+      donacionRepository.findById(doc.getDonacionId()).ifPresent(d -> {
+        recalcularDonador(d.getDonadorId());
+        recalcularDeposito(d.getDepositoId());
+      });
+    }
   }
 
   /** Unidades ya asignadas a la necesidad que todavía no se entregaron (consulta 2). */
@@ -459,6 +581,11 @@ public class EventProcessingService {
       necesidad.getStockPorDeposito().clear();
       necesidad.setUnidadesAsignadasPendientes(0);
       necesidadRepository.save(necesidad);
+    }
+    if (donacionRepository != null) {
+      for (DonacionDocument d : donacionRepository.findAll()) {
+        recalcularDonador(d.getDonadorId());
+      }
     }
     log.info("Modelo de lectura de Logística reiniciado");
   }

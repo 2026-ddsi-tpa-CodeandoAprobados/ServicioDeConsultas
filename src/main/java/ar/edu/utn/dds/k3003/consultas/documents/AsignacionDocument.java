@@ -26,6 +26,7 @@ public class AsignacionDocument implements Serializable {
   private String necesidadId;
   /** Se completa con la entidad de la necesidad, que viene en los eventos de Donadores y Entidades. */
   private String entidadId;
+  private String entidadRazonSocial;
   private String origen;
   private String estado;
   private Instant fechaAsignacion;

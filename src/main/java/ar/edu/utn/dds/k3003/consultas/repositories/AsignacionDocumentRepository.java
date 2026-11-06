@@ -9,4 +9,6 @@ import org.springframework.stereotype.Repository;
 public interface AsignacionDocumentRepository extends MongoRepository<AsignacionDocument, String> {
 
   List<AsignacionDocument> findByNecesidadId(String necesidadId);
+
+  List<AsignacionDocument> findByDonacionIdIn(java.util.Collection<String> donacionIds);
 }

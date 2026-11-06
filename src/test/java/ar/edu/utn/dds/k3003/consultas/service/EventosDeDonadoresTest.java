@@ -14,7 +14,6 @@ import ar.edu.utn.dds.k3003.consultas.documents.EntidadDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.NecesidadUrgenteDocument;
 import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
 import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
-import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
@@ -43,7 +42,6 @@ class EventosDeDonadoresTest {
   @Mock private DonadorDocumentRepository donadorRepository;
   @Mock private NecesidadDocumentRepository necesidadRepository;
   @Mock private DepositoDocumentRepository depositoRepository;
-  @Mock private CalidadDonacionRepository calidadRepository;
   @Mock private AsignacionDocumentRepository asignacionRepository;
   @Mock private EventoProcesadoRepository eventosProcesados;
   @Mock private DonacionDocumentRepository donacionRepository;
@@ -53,7 +51,7 @@ class EventosDeDonadoresTest {
 
   @BeforeEach
   void preparar() {
-    servicio = new EventProcessingService(donadorRepository, necesidadRepository, depositoRepository, calidadRepository);
+    servicio = new EventProcessingService(donadorRepository, necesidadRepository, depositoRepository);
     ReflectionTestUtils.setField(servicio, "asignacionRepository", asignacionRepository);
     ReflectionTestUtils.setField(servicio, "eventosProcesados", eventosProcesados);
     ReflectionTestUtils.setField(servicio, "donacionRepository", donacionRepository);

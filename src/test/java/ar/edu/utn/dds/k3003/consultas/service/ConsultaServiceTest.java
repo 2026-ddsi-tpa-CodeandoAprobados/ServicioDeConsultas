@@ -8,8 +8,8 @@ import static org.mockito.Mockito.*;
 import ar.edu.utn.dds.k3003.consultas.documents.CalidadDonacionDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DepositoDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DonadorDocument;
+import ar.edu.utn.dds.k3003.consultas.documents.DonadorQuejasResumen;
 import ar.edu.utn.dds.k3003.consultas.documents.NecesidadUrgenteDocument;
-import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.NecesidadDocumentRepository;
@@ -31,7 +31,6 @@ public class ConsultaServiceTest {
   @Mock private DonadorDocumentRepository donadorRepository;
   @Mock private NecesidadDocumentRepository necesidadRepository;
   @Mock private DepositoDocumentRepository depositoRepository;
-  @Mock private CalidadDonacionRepository calidadRepository;
   @Mock private MongoTemplate mongoTemplate;
 
   private ConsultaService consultaService;
@@ -43,7 +42,6 @@ public class ConsultaServiceTest {
             donadorRepository,
             necesidadRepository,
             depositoRepository,
-            calidadRepository,
             mongoTemplate);
   }
 
@@ -87,30 +85,33 @@ public class ConsultaServiceTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
   void testConsulta4CalidadPorCategoria() {
     CalidadDonacionDocument cal =
         CalidadDonacionDocument.builder().id("cat1_sub1").categoriaProducto("cat1").build();
-    when(calidadRepository.findByCategoriaProducto("cat1")).thenReturn(List.of(cal));
+    AggregationResults<CalidadDonacionDocument> results = mock(AggregationResults.class);
+    when(results.getMappedResults()).thenReturn(List.of(cal));
+    when(mongoTemplate.aggregate(any(Aggregation.class), eq("donaciones"), eq(CalidadDonacionDocument.class)))
+        .thenReturn(results);
 
-    List<CalidadDonacionDocument> list = consultaService.obtenerCalidadPorCategoria("cat1");
+    List<CalidadDonacionDocument> list = consultaService.obtenerCalidad("cat1", null);
     assertEquals(1, list.size());
   }
 
   @Test
   @SuppressWarnings("unchecked")
   void testConsulta4PipelineAgregacionDonadoresConMasQuejas() {
-    DonadorDocument donador =
-        DonadorDocument.builder().id("12").nombre("Lucia").quejasRecibidas(3).build();
+    DonadorQuejasResumen donador = new DonadorQuejasResumen("12", "Lucia", "VERIFICADO", "COLABORADOR", 3);
 
-    AggregationResults<DonadorDocument> results = mock(AggregationResults.class);
+    AggregationResults<DonadorQuejasResumen> results = mock(AggregationResults.class);
     when(results.getMappedResults()).thenReturn(List.of(donador));
 
-    when(mongoTemplate.aggregate(any(Aggregation.class), eq("donadores"), eq(DonadorDocument.class)))
+    when(mongoTemplate.aggregate(any(Aggregation.class), eq("donadores"), eq(DonadorQuejasResumen.class)))
         .thenReturn(results);
 
-    List<DonadorDocument> donadores = consultaService.obtenerDonadoresConMasQuejasPipeline();
+    List<DonadorQuejasResumen> donadores = consultaService.obtenerDonadoresConMasQuejas(null);
     assertEquals(1, donadores.size());
-    assertEquals(3, donadores.get(0).getQuejasRecibidas());
+    assertEquals(3, donadores.get(0).quejasRecibidas());
   }
 
   @Test
@@ -119,6 +120,5 @@ public class ConsultaServiceTest {
     verify(donadorRepository, times(1)).deleteAll();
     verify(necesidadRepository, times(1)).deleteAll();
     verify(depositoRepository, times(1)).deleteAll();
-    verify(calidadRepository, times(1)).deleteAll();
   }
 }

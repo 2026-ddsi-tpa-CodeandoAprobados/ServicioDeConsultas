@@ -6,6 +6,7 @@ import static org.mockito.Mockito.*;
 import ar.edu.utn.dds.k3003.consultas.documents.CalidadDonacionDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DepositoDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DonadorDocument;
+import ar.edu.utn.dds.k3003.consultas.documents.DonadorQuejasResumen;
 import ar.edu.utn.dds.k3003.consultas.documents.NecesidadUrgenteDocument;
 import ar.edu.utn.dds.k3003.consultas.service.ConsultaService;
 import java.util.List;
@@ -71,21 +72,45 @@ public class ConsultaControllerTest {
 
   @Test
   void testGetCalidadDonaciones() {
-    when(consultaService.obtenerCalidadPorCategoria("Alimentos"))
+    when(consultaService.obtenerCalidad("Alimentos", null))
         .thenReturn(List.of(CalidadDonacionDocument.builder().id("Alimentos_Pastas").build()));
 
-    ResponseEntity<List<CalidadDonacionDocument>> res = controller.getCalidadDonaciones("Alimentos");
+    ResponseEntity<List<CalidadDonacionDocument>> res = controller.getCalidadDonaciones("Alimentos", null);
     assertEquals(HttpStatus.OK, res.getStatusCode());
     assertEquals(1, res.getBody().size());
   }
 
   @Test
-  void testGetDonadoresConMasQuejasPipeline() {
-    when(consultaService.obtenerDonadoresConMasQuejasPipeline())
-        .thenReturn(List.of(DonadorDocument.builder().id("12").quejasRecibidas(5).build()));
+  void testGetCalidadDonacionesPorCategoriaYSubcategoria() {
+    when(consultaService.obtenerCalidad("Alimentos", "Pastas"))
+        .thenReturn(List.of(CalidadDonacionDocument.builder().id("Alimentos_Pastas").build()));
 
-    ResponseEntity<List<DonadorDocument>> res = controller.getDonadoresConMasQuejas();
+    ResponseEntity<List<CalidadDonacionDocument>> res = controller.getCalidadDonaciones("Alimentos", "Pastas");
+    assertEquals(HttpStatus.OK, res.getStatusCode());
+    assertEquals("Alimentos_Pastas", res.getBody().get(0).getId());
+  }
+
+  @Test
+  void testGetDonadoresConMasQuejasPipeline() {
+    when(consultaService.obtenerDonadoresConMasQuejas(null))
+        .thenReturn(List.of(new DonadorQuejasResumen("12", "Lucia", "SOSPECHOSO", "OCASIONAL", 5)));
+
+    ResponseEntity<List<DonadorQuejasResumen>> res = controller.getDonadoresConMasQuejas(null);
     assertEquals(HttpStatus.OK, res.getStatusCode());
     assertEquals(1, res.getBody().size());
+  }
+
+  @Test
+  void testGetDonadoresConMasQuejasConLimite() {
+    when(consultaService.obtenerDonadoresConMasQuejas(3)).thenReturn(List.of());
+
+    assertEquals(HttpStatus.OK, controller.getDonadoresConMasQuejas(3).getStatusCode());
+    verify(consultaService).obtenerDonadoresConMasQuejas(3);
+  }
+
+  @Test
+  void testGetDonadoresConMasQuejasConLimiteInvalido() {
+    assertEquals(HttpStatus.BAD_REQUEST, controller.getDonadoresConMasQuejas(0).getStatusCode());
+    verifyNoInteractions(consultaService);
   }
 }

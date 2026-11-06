@@ -6,30 +6,29 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
 
+/**
+ * Una fila de la consulta 4 (calidad de lo donado). Ya no es una colección: la arma el pipeline de
+ * agregación sobre {@code donaciones} en cada consulta (ver {@code ConsultaService#obtenerCalidad}). Se
+ * conserva el nombre y los campos para que la respuesta del endpoint no cambie.
+ */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Document(collection = "calidad_donaciones")
 public class CalidadDonacionDocument implements Serializable {
+
   private static final long serialVersionUID = 1L;
 
-  @Id private String id; // categoria_subcategoria
+  /** categoria_subcategoria. */
+  private String id;
+
   private String categoriaProducto;
   private String subcategoriaProducto;
   private Integer totalDonaciones;
   private Integer donacionesConQueja;
   private Double proporcionQuejas;
-  private Instant ultimaActualizacion;
 
-  public void recalcularProporcion() {
-    if (totalDonaciones != null && totalDonaciones > 0 && donacionesConQueja != null) {
-      this.proporcionQuejas = (double) donacionesConQueja / totalDonaciones;
-    } else {
-      this.proporcionQuejas = 0.0;
-    }
-  }
+  /** La última actualización de las donaciones del grupo. */
+  private Instant ultimaActualizacion;
 }

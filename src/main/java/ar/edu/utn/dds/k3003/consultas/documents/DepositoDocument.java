@@ -30,7 +30,11 @@ public class DepositoDocument implements Serializable {
 
   @Builder.Default private Map<String, Integer> asignacionesPorEstado = new HashMap<>();
 
-  /** Unidades de cada producto que hay en el depósito (productoId a cantidad). */
+  /**
+   * Unidades de cada producto que hay en el depósito (productoId a cantidad), según el último stock que
+   * publicó Logística. También sirve para completar el stock por depósito de una necesidad que se registra
+   * después del evento de stock.
+   */
   @Builder.Default private Map<String, Integer> stockPorProducto = new HashMap<>();
 
   private Double tiempoPromedioEntregaMinutos;

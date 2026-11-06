@@ -3,6 +3,7 @@ package ar.edu.utn.dds.k3003.consultas.controllers;
 import ar.edu.utn.dds.k3003.consultas.documents.CalidadDonacionDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DepositoDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DonadorDocument;
+import ar.edu.utn.dds.k3003.consultas.documents.DonadorQuejasResumen;
 import ar.edu.utn.dds.k3003.consultas.documents.NecesidadUrgenteDocument;
 import ar.edu.utn.dds.k3003.consultas.service.ConsultaService;
 import java.util.List;
@@ -106,19 +107,26 @@ public class ConsultaController {
   /**
    * Consulta 4 (Parte 1): Calidad de lo donado
    * "Por categoría y subcategoría de producto, calcular la proporción de donaciones que terminaron con queja."
+   * Pipeline de agregación sobre las donaciones; filtros opcionales por categoría y subcategoría.
    */
   @GetMapping("/calidad-donaciones")
   public ResponseEntity<List<CalidadDonacionDocument>> getCalidadDonaciones(
-      @RequestParam(required = false) String categoria) {
-    return ResponseEntity.ok(consultaService.obtenerCalidadPorCategoria(categoria));
+      @RequestParam(required = false) String categoria,
+      @RequestParam(required = false) String subcategoria) {
+    return ResponseEntity.ok(consultaService.obtenerCalidad(categoria, subcategoria));
   }
 
   /**
    * Consulta 4 (Parte 2): Donadores con más quejas resuelto con PIPELINE DE AGREGACIÓN de MongoDB.
    * "listar los donadores con más quejas junto con su estado y su categoría."
+   * {@code limite} es opcional (por defecto {@code app.consultas.ranking-limite}, 10).
    */
   @GetMapping("/donadores-con-mas-quejas")
-  public ResponseEntity<List<DonadorDocument>> getDonadoresConMasQuejas() {
-    return ResponseEntity.ok(consultaService.obtenerDonadoresConMasQuejasPipeline());
+  public ResponseEntity<List<DonadorQuejasResumen>> getDonadoresConMasQuejas(
+      @RequestParam(required = false) Integer limite) {
+    if (limite != null && limite < 1) {
+      return ResponseEntity.badRequest().build();
+    }
+    return ResponseEntity.ok(consultaService.obtenerDonadoresConMasQuejas(limite));
   }
 }

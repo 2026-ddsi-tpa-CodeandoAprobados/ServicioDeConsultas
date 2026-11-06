@@ -4,11 +4,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-import ar.edu.utn.dds.k3003.consultas.documents.CalidadDonacionDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.DonadorDocument;
 import ar.edu.utn.dds.k3003.consultas.documents.NecesidadUrgenteDocument;
 import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
-import ar.edu.utn.dds.k3003.consultas.repositories.CalidadDonacionRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.NecesidadDocumentRepository;
@@ -29,7 +27,6 @@ public class EventProcessingServiceTest {
   @Mock private DonadorDocumentRepository donadorRepository;
   @Mock private NecesidadDocumentRepository necesidadRepository;
   @Mock private DepositoDocumentRepository depositoRepository;
-  @Mock private CalidadDonacionRepository calidadRepository;
 
   private EventProcessingService eventProcessingService;
 
@@ -39,8 +36,7 @@ public class EventProcessingServiceTest {
         new EventProcessingService(
             donadorRepository,
             necesidadRepository,
-            depositoRepository,
-            calidadRepository);
+            depositoRepository);
   }
 
   @Test
@@ -121,7 +117,6 @@ public class EventProcessingServiceTest {
     quejaData.put("categoriaProducto", "Alimentos");
     quejaData.put("subcategoriaProducto", "Pastas");
 
-    when(calidadRepository.findById("Alimentos_Pastas")).thenReturn(Optional.empty());
 
     EventoGenerico evento =
         EventoGenerico.builder()
@@ -140,8 +135,7 @@ public class EventProcessingServiceTest {
     DonadorDocument saved = captor.getValue();
     assertEquals(5, saved.getQuejasRecibidas());
     assertEquals("SOSPECHOSO", saved.getEstado());
-
-    verify(calidadRepository, times(1)).save(any(CalidadDonacionDocument.class));
+    // La queja ya no escribe la calidad (consulta 4): sale del estado CONQUEJA de la donación.
   }
 
   @Test

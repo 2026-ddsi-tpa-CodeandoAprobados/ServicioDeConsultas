@@ -9,35 +9,51 @@ import ar.edu.utn.dds.k3003.consultas.service.ConsultaService;
 import java.time.Instant;
 import java.util.*;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * Operaciones de mantenimiento para la demo: borrar el modelo de lectura y cargar datos de ejemplo. No tienen
+ * autenticación, así que están apagadas salvo que se defina {@code ADMIN_ENABLED=true}; apagadas responden
+ * 403 sin tocar la base.
+ */
 @Slf4j
 @RestController
 @RequestMapping("/consultas/admin")
 public class AdminController {
+
+  private static final String DESHABILITADO = "Operación de administración deshabilitada";
 
   private final ConsultaService consultaService;
   private final DonadorDocumentRepository donadorRepository;
   private final NecesidadDocumentRepository necesidadRepository;
   private final DepositoDocumentRepository depositoRepository;
   private final DonacionDocumentRepository donacionRepository;
+  private final boolean habilitado;
 
   public AdminController(
       ConsultaService consultaService,
       DonadorDocumentRepository donadorRepository,
       NecesidadDocumentRepository necesidadRepository,
       DepositoDocumentRepository depositoRepository,
-      DonacionDocumentRepository donacionRepository) {
+      DonacionDocumentRepository donacionRepository,
+      @Value("${app.admin.enabled:false}") boolean habilitado) {
     this.consultaService = consultaService;
     this.donadorRepository = donadorRepository;
     this.necesidadRepository = necesidadRepository;
     this.depositoRepository = depositoRepository;
     this.donacionRepository = donacionRepository;
+    this.habilitado = habilitado;
   }
 
   @DeleteMapping("/reset")
   public ResponseEntity<Map<String, String>> resetDatabase() {
+    if (!habilitado) {
+      log.warn("DELETE /consultas/admin/reset rechazado: ADMIN_ENABLED no está activo");
+      return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", DESHABILITADO));
+    }
     consultaService.borrarTodo();
     return ResponseEntity.ok(Map.of("mensaje", "Base de datos MongoDB reiniciada con éxito"));
   }
@@ -47,6 +63,10 @@ public class AdminController {
    */
   @PostMapping("/seed-demo")
   public ResponseEntity<Map<String, Object>> seedDemoData() {
+    if (!habilitado) {
+      log.warn("POST /consultas/admin/seed-demo rechazado: ADMIN_ENABLED no está activo");
+      return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", DESHABILITADO));
+    }
     log.info("Cargando datos de demostración en MongoDB...");
 
     // 1. Donador de ejemplo del documento (Página 5)

@@ -11,6 +11,7 @@ import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.NecesidadDocumentRepository;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +20,9 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class EventProcessingService {
+
+  /** idReferencia con el que Incentivos publica BASE_LIMPIADA. */
+  private static final String ORIGEN_INCENTIVOS = "incentivos";
 
   private final DonadorDocumentRepository donadorRepository;
   private final NecesidadDocumentRepository necesidadRepository;
@@ -59,7 +63,16 @@ public class EventProcessingService {
     log.info("Procesando evento CQRS '{}' para referencia '{}' [ID: {}]", tipo, evento.getIdReferencia(), evento.getId());
 
     try {
-      if (tipo.contains("DONADOR_CREADO")) {
+      if (tipo.equals("DONADOR_ACTUALIZADO")) {
+        handleDonadorActualizado(evento);
+      } else if (tipo.startsWith("INSIGNIA_") || tipo.startsWith("MISION_")) {
+        // Cambios del catálogo de Incentivos: no son de un donador. Lo que cada donador tiene llega
+        // completo en DONADOR_ACTUALIZADO.
+        log.info("Evento de catálogo de Incentivos '{}' [{}] ignorado: no modifica donadores",
+            tipo, evento.getIdReferencia());
+      } else if (tipo.equals("BASE_LIMPIADA") && ORIGEN_INCENTIVOS.equalsIgnoreCase(evento.getIdReferencia())) {
+        handleBaseLimpiadaIncentivos(evento);
+      } else if (tipo.contains("DONADOR_CREADO")) {
         handleDonadorCreado(evento);
       } else if (tipo.contains("DONADOR_ESTADO")) {
         handleDonadorEstado(evento);
@@ -69,10 +82,6 @@ public class EventProcessingService {
         handleDonadorEliminado(evento);
       } else if (tipo.contains("QUEJA_REGISTRADA") || tipo.contains("QUEJA")) {
         handleQuejaRegistrada(evento);
-      } else if (tipo.contains("INSIGNIA")) {
-        handleInsignia(evento);
-      } else if (tipo.contains("MISION")) {
-        handleMision(evento);
       } else if (tipo.contains("DONACION")) {
         handleDonacion(evento);
       } else if (tipo.contains("NECESIDAD_REGISTRADA")) {
@@ -196,39 +205,107 @@ public class EventProcessingService {
     }
   }
 
-  private void handleInsignia(EventoGenerico evento) {
-    Map<String, Object> ins = evento.getInsignia() != null ? evento.getInsignia() : evento.getExtra();
-    String donadorId = evento.getIdReferencia() != null ? evento.getIdReferencia() : (String) ins.get("donadorId");
-    String nombreInsignia = (String) ins.get("nombre");
-    if (nombreInsignia == null) nombreInsignia = (String) ins.get("id");
+  // ----- Incentivos -----
 
-    if (donadorId != null && nombreInsignia != null) {
-      DonadorDocument donador = donadorRepository.findById(donadorId)
-          .orElseGet(() -> DonadorDocument.builder().id(donadorId).build());
-
-      if (!donador.getInsignias().contains(nombreInsignia)) {
-        donador.getInsignias().add(nombreInsignia);
-        donador.setUltimaActualizacion(evento.getTimestamp());
-        donadorRepository.save(donador);
-      }
+  /**
+   * Incentivos manda el estado completo del donador (categoría, historial, insignias, misión en curso y
+   * misiones completadas): esos campos se reemplazan, no se mezclan. Se descarta si es más viejo que el
+   * último evento de Incentivos aplicado. No toca {@code ultimaActualizacion}, que es de los otros módulos.
+   */
+  private void handleDonadorActualizado(EventoGenerico evento) {
+    Map<String, Object> data = evento.getDonador();
+    if (data == null) {
+      log.warn("DONADOR_ACTUALIZADO sin el campo 'donador' [ID: {}], se ignora", evento.getId());
+      return;
     }
+    String donadorId = evento.getIdReferencia() != null ? evento.getIdReferencia() : texto(data, "id");
+    if (donadorId == null) return;
+
+    DonadorDocument doc = donadorRepository.findById(donadorId)
+        .orElseGet(() -> DonadorDocument.builder().id(donadorId).build());
+    if (esObsoleto(doc.getUltimaActualizacionIncentivos(), evento)) {
+      log.info("DONADOR_ACTUALIZADO más viejo que lo guardado para '{}' [ID: {}], se ignora", donadorId, evento.getId());
+      return;
+    }
+
+    doc.setCategoria(texto(data, "categoriaActual"));
+
+    List<HistorialCategoria> historial = new ArrayList<>();
+    for (Map<String, Object> cambio : mapas(data.get("historialCategorias"))) {
+      historial.add(HistorialCategoria.builder()
+          .categoria(texto(cambio, "categoria"))
+          .desde(fecha(cambio.get("desde")))
+          .build());
+    }
+    doc.setHistorialCategorias(historial);
+
+    doc.setInsignias(nombres(data.get("insignias")));
+    doc.setMisionesCompletadas(nombres(data.get("misionesCompletadas")));
+
+    Object enCurso = data.get("misionEnCurso");
+    if (enCurso instanceof Map<?, ?>) {
+      @SuppressWarnings("unchecked")
+      Map<String, Object> mision = (Map<String, Object>) enCurso;
+      doc.setMisionEnCurso(MisionEnCurso.builder()
+          .nombre(texto(mision, "nombre"))
+          .progreso(numero(mision, "progreso"))
+          .objetivo(numero(mision, "objetivo"))
+          .build());
+    } else {
+      doc.setMisionEnCurso(null);
+    }
+
+    doc.setUltimaActualizacionIncentivos(evento.getTimestamp());
+    donadorRepository.save(doc);
+    log.info("Incentivos del donador {} actualizados en MongoDB", donadorId);
   }
 
-  private void handleMision(EventoGenerico evento) {
-    Map<String, Object> mis = evento.getMision() != null ? evento.getMision() : evento.getExtra();
-    String donadorId = evento.getIdReferencia() != null ? evento.getIdReferencia() : (String) mis.get("donadorId");
+  /**
+   * Se vació la base de Incentivos: se borran las insignias y las misiones de los donadores, sin borrar
+   * los documentos. La categoría y su historial se conservan porque también los informa Donadores.
+   */
+  private void handleBaseLimpiadaIncentivos(EventoGenerico evento) {
+    List<DonadorDocument> donadores = donadorRepository.findAll();
+    for (DonadorDocument d : donadores) {
+      d.setInsignias(new ArrayList<>());
+      d.setMisionEnCurso(null);
+      d.setMisionesCompletadas(new ArrayList<>());
+      // Un DONADOR_ACTUALIZADO anterior al reinicio que llegue tarde queda descartado.
+      d.setUltimaActualizacionIncentivos(evento.getTimestamp());
+    }
+    donadorRepository.saveAll(donadores);
+    log.info("Datos de Incentivos limpiados en {} donadores", donadores.size());
+  }
 
-    if (donadorId != null) {
-      DonadorDocument donador = donadorRepository.findById(donadorId)
-          .orElseGet(() -> DonadorDocument.builder().id(donadorId).build());
+  /** Los elementos de una lista del evento que son objetos JSON. */
+  @SuppressWarnings("unchecked")
+  private static List<Map<String, Object>> mapas(Object lista) {
+    List<Map<String, Object>> resultado = new ArrayList<>();
+    if (lista instanceof List<?> items) {
+      for (Object item : items) {
+        if (item instanceof Map<?, ?> m) resultado.add((Map<String, Object>) m);
+      }
+    }
+    return resultado;
+  }
 
-      Integer progreso = mis.get("progreso") instanceof Number n ? n.intValue() : 0;
-      Integer objetivo = mis.get("objetivo") instanceof Number n ? n.intValue() : 10;
-      String nombre = (String) mis.get("nombre");
+  /** El nombre de cada objeto de la lista (o su id, si no tiene nombre). */
+  private static List<String> nombres(Object lista) {
+    List<String> resultado = new ArrayList<>();
+    for (Map<String, Object> item : mapas(lista)) {
+      String nombre = texto(item, "nombre", "id");
+      if (nombre != null) resultado.add(nombre);
+    }
+    return resultado;
+  }
 
-      donador.setMisionEnCurso(MisionEnCurso.builder().nombre(nombre).progreso(progreso).objetivo(objetivo).build());
-      donador.setUltimaActualizacion(evento.getTimestamp());
-      donadorRepository.save(donador);
+  /** Un instante ISO-8601 pasado a fecha UTC (yyyy-MM-dd); si no se puede leer, el texto tal cual. */
+  private static String fecha(Object valor) {
+    if (valor == null) return null;
+    try {
+      return LocalDate.ofInstant(Instant.parse(String.valueOf(valor)), ZoneOffset.UTC).toString();
+    } catch (Exception e) {
+      return String.valueOf(valor);
     }
   }
 

@@ -5,10 +5,10 @@ import ar.edu.utn.dds.k3003.consultas.messaging.EventoGenerico;
 import ar.edu.utn.dds.k3003.consultas.metrics.ConsultasMetrics;
 import ar.edu.utn.dds.k3003.consultas.repositories.AsignacionDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonacionDocumentRepository;
+import ar.edu.utn.dds.k3003.consultas.repositories.EntidadDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.EventoProcesadoRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DepositoDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.DonadorDocumentRepository;
-import ar.edu.utn.dds.k3003.consultas.repositories.EntidadDocumentRepository;
 import ar.edu.utn.dds.k3003.consultas.repositories.NecesidadDocumentRepository;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -614,17 +614,21 @@ public class EventProcessingService {
   /**
    * ENTIDAD_CREADA trae {@code entidad{id, razonSocial, ...}}; ENTIDAD_RAZON_MODIFICADA trae
    * {@code extra.razonSocial}. La razón social se propaga a las necesidades y asignaciones de la entidad.
-   * Al eliminar una entidad se borra su documento pero las necesidades y asignaciones conservan la razón
-   * social: las entregas que ya recibió siguen siendo parte de la historia de cada donador.
+   * Al eliminar una entidad se borra su documento pero las asignaciones conservan la razón social: las
+   * entregas que ya recibió siguen siendo parte de la historia de cada donador.
+   *
+   * <p>ENTIDADES_TODAS_ELIMINADAS borra también todas las necesidades: en Donadores el borrado total de
+   * entidades se lleva sus necesidades (FK) y no publica NECESIDAD_ELIMINADA por cada una.
    */
   private void handleEntidad(EventoGenerico evento) {
-    if (entidadRepository == null) return;
     String tipo = evento.getTipo().toUpperCase();
     if (tipo.equals("ENTIDADES_TODAS_ELIMINADAS")) {
-      entidadRepository.deleteAll();
-      log.info("Entidades eliminadas del modelo de lectura");
+      if (entidadRepository != null) entidadRepository.deleteAll();
+      necesidadRepository.deleteAll();
+      log.info("Todas las entidades y sus necesidades eliminadas del modelo de lectura");
       return;
     }
+    if (entidadRepository == null) return;
     Map<String, Object> datos = evento.getEntidad() != null ? evento.getEntidad() : evento.getExtra();
     String entidadId = evento.getIdReferencia() != null ? evento.getIdReferencia() : texto(datos, "id");
     if (entidadId == null) return;
@@ -730,7 +734,7 @@ public class EventProcessingService {
 
     Map<String, Integer> porProducto = null;
     if (dep.get("stock") instanceof List<?> stock) {
-      porProducto = stockPorProducto(stock);
+      porProducto = agruparStock(stock);
       doc.setStockPorProducto(porProducto);
     }
 
@@ -740,20 +744,6 @@ public class EventProcessingService {
     if (porProducto != null) {
       actualizarStockPorDeposito(depositoId, porProducto);
     }
-  }
-
-  private static Map<String, Integer> stockPorProducto(List<?> stock) {
-    Map<String, Integer> porProducto = new HashMap<>();
-    for (Object item : stock) {
-      if (item instanceof Map<?, ?> paquete) {
-        Object producto = paquete.get("productoId");
-        Object cantidad = paquete.get("cantidad");
-        if (producto != null && cantidad instanceof Number n) {
-          porProducto.merge(String.valueOf(producto), n.intValue(), Integer::sum);
-        }
-      }
-    }
-    return porProducto;
   }
 
   /** Las necesidades guardan cuánto stock de su producto hay en cada depósito (consulta 2). */
@@ -769,6 +759,21 @@ public class EventProcessingService {
         necesidadRepository.save(necesidad);
       }
     }
+  }
+
+  /** Suma las unidades de cada producto de la lista de paquetes que trae el evento del depósito. */
+  private static Map<String, Integer> agruparStock(List<?> stock) {
+    Map<String, Integer> porProducto = new HashMap<>();
+    for (Object item : stock) {
+      if (item instanceof Map<?, ?> paquete) {
+        Object producto = paquete.get("productoId");
+        Object cantidad = paquete.get("cantidad");
+        if (producto != null && cantidad instanceof Number n) {
+          porProducto.merge(String.valueOf(producto), n.intValue(), Integer::sum);
+        }
+      }
+    }
+    return porProducto;
   }
 
   private void quitarDepositoDeLasNecesidades(String depositoId) {

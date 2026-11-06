@@ -258,12 +258,19 @@ class EventosRealesTest {
   }
 
   @Test
-  void siDonadoresVaciaLasEntidadesSeBorranPeroLaHistoriaQueda() {
+  void siDonadoresVaciaLasEntidadesSeBorranConSusNecesidadesPeroLaHistoriaQueda() {
     circuitoCompleto();
-    procesar(entidadesTodasEliminadas("2026-11-06T14:00:00Z"));
+    procesar(
+        entregaCompletada("2026-11-06T13:00:00Z", "a1", "7", "5", 10, "n1", "2026-11-06T11:00:00Z"),
+        entidadesTodasEliminadas("2026-11-06T14:00:00Z"));
 
+    // En Donadores el borrado total de entidades se lleva sus necesidades sin publicar NECESIDAD_ELIMINADA.
     assertTrue(entidades.findAll().isEmpty());
-    assertEquals("Comedor Los Girasoles", necesidad("n1").getEntidadRazonSocial());
+    assertTrue(necesidades.findAll().isEmpty());
+    // Lo que ya se entregó sigue en la ficha del donador y en la asignación.
+    assertEquals(List.of(new EntidadBeneficiadaResumen("4", "Comedor Los Girasoles", 10)),
+        donador("12").getEntidadesBeneficiadas());
+    assertEquals("Comedor Los Girasoles", asignaciones.findById("a1").orElseThrow().getEntidadRazonSocial());
   }
 
   // ---------------- Consulta 3 ----------------

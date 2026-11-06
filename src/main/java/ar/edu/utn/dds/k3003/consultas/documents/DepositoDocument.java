@@ -1,6 +1,5 @@
 package ar.edu.utn.dds.k3003.consultas.documents;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.HashMap;
@@ -31,17 +30,18 @@ public class DepositoDocument implements Serializable {
 
   @Builder.Default private Map<String, Integer> asignacionesPorEstado = new HashMap<>();
 
+  /**
+   * Unidades de cada producto que hay en el depósito (productoId a cantidad), según el último stock que
+   * publicó Logística. También sirve para completar el stock por depósito de una necesidad que se registra
+   * después del evento de stock.
+   */
+  @Builder.Default private Map<String, Integer> stockPorProducto = new HashMap<>();
+
   private Double tiempoPromedioEntregaMinutos;
 
   @Builder.Default private Set<String> entidadesDistintasAtendidas = new HashSet<>();
 
   private Integer cantidadEntidadesDistintas;
-
-  /**
-   * Unidades guardadas de cada producto, según el último stock que publicó Logística. Sirve para completar
-   * el stock por depósito de una necesidad que se registra después del evento de stock. Es interno.
-   */
-  @JsonIgnore @Builder.Default private Map<String, Integer> stockPorProducto = new HashMap<>();
 
   private Instant ultimaActualizacion;
 

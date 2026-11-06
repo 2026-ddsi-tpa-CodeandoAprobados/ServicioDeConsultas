@@ -73,7 +73,7 @@ Un documento por necesidad material.
 | `entidadRazonSocial` | `ENTIDAD_CREADA`, `ENTIDAD_RAZON_MODIFICADA`, o el registro de la necesidad | Se toma de `entidades`. |
 | `stockPorDeposito` | `DEPOSITO_*` con `stock` (Logística); `DEPOSITO_ELIMINADO`; `BASE_LIMPIADA` de Logística | Unidades del producto solicitado en cada depósito. Si la necesidad se registra después del evento de stock, se inicializa desde `depositos.stockPorProducto`. |
 | `unidadesAsignadasPendientes` | `ASIGNACION_CREADA`, `ENTREGA_COMPLETADA` (Logística); `NECESIDAD_REGISTRADA` | Suma de las asignaciones `ASIGNADA` de la necesidad en `asignaciones`. |
-| todo el documento | `NECESIDAD_ELIMINADA` | Se borra. |
+| todo el documento | `NECESIDAD_ELIMINADA`; `ENTIDADES_TODAS_ELIMINADAS` (todas) | Se borra. En Donadores el borrado total de entidades se lleva sus necesidades sin publicar `NECESIDAD_ELIMINADA`. |
 
 `NECESIDAD_REGISTRADA` no pisa los campos de Logística. Hace falta porque Donadores le pide a Logística que asigne **antes** de publicar la necesidad, así que la asignación suele llegar primero. `ultimaActualizacion` lo escriben solo los eventos de Donadores, de modo que un evento de Logística más nuevo no hace descartar uno de Donadores.
 
@@ -101,7 +101,7 @@ Un documento por necesidad material.
 | `asignacionesPorEstado`, `tiempoPromedioEntregaMinutos`, `entidadesDistintasAtendidas` | `DONACION_*`, `ASIGNACION_CREADA`, `ENTREGA_COMPLETADA`, `NECESIDAD_REGISTRADA`, `ENTIDAD_RAZON_MODIFICADA` | Se recalcula desde las donaciones del depósito y sus asignaciones. El tiempo de entrega va de `donaciones.fechaIngreso` a `asignaciones.fechaEntrega`. |
 | todo el documento | `DEPOSITO_ELIMINADO`, `BASE_LIMPIADA` de Logística | Se borra. |
 
-`stockPorProducto` es interno.
+`stockPorProducto` sale también en la respuesta de C3.
 
 **Resuelve:** consulta 3 (`GET /consultas/depositos`, `/depositos/{id}`). Con rango de fechas (`/depositos/estado?desde&hasta`) las estadísticas se recalculan al consultar, a partir de `donaciones` y `asignaciones`.
 
@@ -156,7 +156,7 @@ Hoy Donaciones publica los productos **sin** categoría ni subcategoría (`detal
 
 `{ "_id": "4", "razonSocial": "Comedor Los Girasoles", "ultimaActualizacion": "…" }`
 
-La actualizan `ENTIDAD_CREADA` y `ENTIDAD_RAZON_MODIFICADA` (que se propaga a necesidades, asignaciones y donadores), y `ENTIDAD_ELIMINADA` / `ENTIDADES_TODAS_ELIMINADAS` (borrado). Al borrar una entidad, las necesidades y asignaciones conservan la razón social: las entregas que ya recibió siguen en la historia de cada donador.
+La actualizan `ENTIDAD_CREADA` y `ENTIDAD_RAZON_MODIFICADA` (que se propaga a necesidades, asignaciones y donadores), y `ENTIDAD_ELIMINADA` / `ENTIDADES_TODAS_ELIMINADAS` (borrado; el total borra también las necesidades). Las asignaciones conservan la razón social: las entregas que ya recibió una entidad siguen en la historia de cada donador. Pendiente: Donadores también borra en cascada las necesidades de una entidad cuando se elimina sola (`ENTIDAD_ELIMINADA`), y eso todavía no se refleja acá.
 
 **Resuelve:** la razón social en las consultas 1 y 2.
 

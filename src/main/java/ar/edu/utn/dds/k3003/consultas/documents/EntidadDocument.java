@@ -10,8 +10,8 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 /**
- * Entidad beneficiaria tal como la publica Donadores y Entidades (ENTIDAD_*). Se guarda solo para
- * completar la razón social en las necesidades (consulta 2) y en las entidades beneficiadas de cada
+ * Nombre de cada entidad benéfica, tal como lo informa Donadores y Entidades (ENTIDAD_*). Se guarda solo
+ * para completar la razón social en las necesidades (consulta 2) y en las entidades beneficiadas de cada
  * donador (consulta 1), que en los eventos llegan solo con el id de la entidad.
  */
 @Data

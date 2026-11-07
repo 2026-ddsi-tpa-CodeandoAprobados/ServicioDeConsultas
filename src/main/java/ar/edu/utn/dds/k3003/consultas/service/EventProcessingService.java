@@ -730,8 +730,8 @@ public class EventProcessingService {
   /**
    * ENTIDAD_CREADA trae {@code entidad{id, razonSocial, ...}}; ENTIDAD_RAZON_MODIFICADA trae
    * {@code extra.razonSocial}. La razón social se propaga a las necesidades y asignaciones de la entidad.
-   * Al eliminar una entidad se borra su documento pero las asignaciones conservan la razón social: las
-   * entregas que ya recibió siguen siendo parte de la historia de cada donador.
+   * Al eliminar una entidad se borran su documento y sus necesidades, pero las asignaciones conservan la razón
+   * social: las entregas que ya recibió siguen siendo parte de la historia de cada donador.
    *
    * <p>ENTIDADES_TODAS_ELIMINADAS borra también todas las necesidades: en Donadores el borrado total de
    * entidades se lleva sus necesidades (FK) y no publica NECESIDAD_ELIMINADA por cada una.
@@ -751,7 +751,13 @@ public class EventProcessingService {
 
     if (tipo.contains("ELIMINADA")) {
       entidadRepository.deleteById(entidadId);
-      log.info("Entidad eliminada de MongoDB: {}", entidadId);
+      // En Donadores la baja de la entidad se lleva sus necesidades en cascada (cascade = ALL, orphanRemoval)
+      // sin publicar NECESIDAD_ELIMINADA por cada una: se borran acá para que no sigan en la consulta 2.
+      List<NecesidadUrgenteDocument> suyas = necesidadRepository.findByEntidadId(entidadId);
+      for (NecesidadUrgenteDocument necesidad : suyas) {
+        necesidadRepository.deleteById(necesidad.getId());
+      }
+      log.info("Entidad eliminada de MongoDB: {} (y {} necesidades)", entidadId, suyas.size());
       return;
     }
 

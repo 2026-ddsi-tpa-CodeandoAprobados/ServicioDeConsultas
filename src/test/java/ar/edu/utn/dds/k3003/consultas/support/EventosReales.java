@@ -179,6 +179,13 @@ public final class EventosReales {
     return leer(json, TYPE_ID_DONADORES);
   }
 
+  public static EventoGenerico entidadEliminada(String timestamp, String id) {
+    String json = """
+        {"id":"%s","tipo":"ENTIDAD_ELIMINADA","timestamp":"%s","idReferencia":"%s","extra":{}}
+        """.formatted(uuid(), timestamp, id);
+    return leer(json, TYPE_ID_DONADORES);
+  }
+
   public static EventoGenerico entidadesTodasEliminadas(String timestamp) {
     String json = """
         {"id":"%s","tipo":"ENTIDADES_TODAS_ELIMINADAS","timestamp":"%s","extra":{}}

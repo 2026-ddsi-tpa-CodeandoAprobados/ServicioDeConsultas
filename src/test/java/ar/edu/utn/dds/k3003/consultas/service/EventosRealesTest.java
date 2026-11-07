@@ -273,6 +273,27 @@ class EventosRealesTest {
     assertEquals("Comedor Los Girasoles", asignaciones.findById("a1").orElseThrow().getEntidadRazonSocial());
   }
 
+  @Test
+  void laBajaDeUnaEntidadSeLlevaSusNecesidadesYNoLasDeOtras() {
+    circuitoCompleto();
+    procesar(
+        entidadCreada("2026-11-06T09:30:00Z", "8", "Hogar San José"),
+        necesidadRegistrada("2026-11-06T11:30:00Z", "n2", "8", 5, 40, "5"),
+        entregaCompletada("2026-11-06T13:00:00Z", "a1", "7", "5", 10, "n1", "2026-11-06T11:00:00Z"));
+
+    procesar(entidadEliminada("2026-11-06T14:00:00Z", "4"));
+
+    // En Donadores la baja de la entidad se lleva sus necesidades en cascada sin publicar NECESIDAD_ELIMINADA.
+    assertTrue(entidades.findById("4").isEmpty());
+    assertTrue(necesidades.findById("n1").isEmpty(), "la necesidad de la entidad borrada no sigue en C2");
+    assertEquals("8", necesidad("n2").getEntidadId(), "las necesidades de otras entidades quedan");
+    assertTrue(entidades.findById("8").isPresent());
+    // Lo que ya se entregó sigue en la ficha del donador y en la asignación.
+    assertEquals(List.of(new EntidadBeneficiadaResumen("4", "Comedor Los Girasoles", 10)),
+        donador("12").getEntidadesBeneficiadas());
+    assertEquals("Comedor Los Girasoles", asignaciones.findById("a1").orElseThrow().getEntidadRazonSocial());
+  }
+
   // ---------------- Consulta 3 ----------------
 
   @Test

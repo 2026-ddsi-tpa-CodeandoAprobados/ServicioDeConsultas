@@ -167,8 +167,10 @@ public class AdminController {
                       ProductoDonado.builder()
                           .productoId("prod-fideos")
                           .cantidad(10)
-                          .categoriaId("Alimentos")
-                          .subcategoriaId("Pastas")
+                          .categoriaId("1")
+                          .categoria("Alimentos")
+                          .subcategoriaId("4")
+                          .subcategoria("Pastas")
                           .build())))
               .ultimaActualizacion(Instant.now())
               .build());

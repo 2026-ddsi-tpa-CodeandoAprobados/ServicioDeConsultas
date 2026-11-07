@@ -68,6 +68,25 @@ public final class EventosReales {
   }
 
   /**
+   * DONACION_* como lo publica hoy Donaciones ({@code DetalleProductoEvento}: ids y nombres de la categoría y
+   * la subcategoría; con {@code NON_NULL}, un null no viaja).
+   */
+  public static EventoGenerico donacionClasificada(String tipo, String timestamp, String id, String estado,
+      String productoId, String categoriaId, String categoria, String subcategoriaId, String subcategoria) {
+    StringBuilder detalle = new StringBuilder("\"id\":\"92\",\"productoID\":\"" + productoId + "\",\"cantidadProducto\":4");
+    if (categoriaId != null) detalle.append(",\"categoriaID\":\"").append(categoriaId).append('"');
+    if (categoria != null) detalle.append(",\"categoria\":\"").append(categoria).append('"');
+    if (subcategoriaId != null) detalle.append(",\"subcategoriaID\":\"").append(subcategoriaId).append('"');
+    if (subcategoria != null) detalle.append(",\"subcategoria\":\"").append(subcategoria).append('"');
+    String json = """
+        {"id":"%s","tipo":"%s","timestamp":"%s","idReferencia":"%s",
+         "donacion":{"id":"%s","donadorID":"12","depositoID":"3","descripcion":"Donación",
+           "detallesProductosDTO":[{%s}],"estado":"%s","fechaRegistro":"2026-11-06"}}
+        """.formatted(uuid(), tipo, timestamp, id, id, detalle, estado);
+    return leer(json, "ar.edu.utn.dds.k3003.messaging.EventoDonaciones");
+  }
+
+  /**
    * PRODUCTO_CREADO / PRODUCTO_MODIFICADO / PRODUCTO_ELIMINADO tal como los arma {@code DonacionesEventPublisher}
    * (record {@code ProductoEvento}, {@code NON_NULL}: un null no viaja).
    */

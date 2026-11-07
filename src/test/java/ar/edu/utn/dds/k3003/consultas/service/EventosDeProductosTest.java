@@ -91,9 +91,11 @@ class EventosDeProductosTest {
 
     servicio.procesar(productoEvento("PRODUCTO_CREADO", Instant.parse("2026-11-06T14:00:00Z")));
 
-    assertEquals("Alimentos", donacion.getProductos().get(0).getCategoriaId());
-    assertEquals("Fideos", donacion.getProductos().get(0).getSubcategoriaId());
-    assertEquals(null, donacion.getProductos().get(1).getCategoriaId(), "los otros productos no cambian");
+    assertEquals("Alimentos", donacion.getProductos().get(0).getCategoria());
+    assertEquals("Fideos", donacion.getProductos().get(0).getSubcategoria());
+    assertEquals("1", donacion.getProductos().get(0).getCategoriaId());
+    assertEquals("2", donacion.getProductos().get(0).getSubcategoriaId());
+    assertEquals(null, donacion.getProductos().get(1).getCategoria(), "los otros productos no cambian");
     verify(donacionRepository).save(donacion);
   }
 
@@ -150,8 +152,11 @@ class EventosDeProductosTest {
 
     ArgumentCaptor<DonacionDocument> donacion = ArgumentCaptor.forClass(DonacionDocument.class);
     verify(donacionRepository).save(donacion.capture());
-    assertEquals("Alimentos", donacion.getValue().getProductos().get(0).getCategoriaId());
-    assertEquals("Fideos", donacion.getValue().getProductos().get(0).getSubcategoriaId());
+    ProductoDonado guardado = donacion.getValue().getProductos().get(0);
+    assertEquals("Alimentos", guardado.getCategoria());
+    assertEquals("Fideos", guardado.getSubcategoria());
+    assertEquals("1", guardado.getCategoriaId(), "el id se guarda aparte del nombre");
+    assertEquals("2", guardado.getSubcategoriaId());
   }
 
   @Test
@@ -167,7 +172,7 @@ class EventosDeProductosTest {
 
     ArgumentCaptor<DonacionDocument> donacion = ArgumentCaptor.forClass(DonacionDocument.class);
     verify(donacionRepository).save(donacion.capture());
-    assertEquals("Alimentos", donacion.getValue().getProductos().get(0).getCategoriaId());
-    assertEquals("Fideos", donacion.getValue().getProductos().get(0).getSubcategoriaId());
+    assertEquals("Alimentos", donacion.getValue().getProductos().get(0).getCategoria());
+    assertEquals("Fideos", donacion.getValue().getProductos().get(0).getSubcategoria());
   }
 }

@@ -419,8 +419,10 @@ public class EventProcessingService {
           ProductoDonado donado = ProductoDonado.builder()
               .productoId(texto(p, "productoID", "productoId"))
               .cantidad(numero(p, "cantidadProducto", "cantidad"))
-              .categoriaId(texto(p, "categoria", "categoriaNombre", "categoriaID", "categoriaId"))
-              .subcategoriaId(texto(p, "subcategoria", "subcategoriaNombre", "subcategoriaID", "subcategoriaId"))
+              .categoriaId(texto(p, "categoriaID", "categoriaId"))
+              .categoria(texto(p, "categoria", "categoriaNombre"))
+              .subcategoriaId(texto(p, "subcategoriaID", "subcategoriaId"))
+              .subcategoria(texto(p, "subcategoria", "subcategoriaNombre"))
               .build();
           clasificarConElProducto(donado);
           productos.add(donado);
@@ -476,8 +478,7 @@ public class EventProcessingService {
       for (DonacionDocument donacion : donacionRepository.findByProductosProductoId(productoId)) {
         for (ProductoDonado donado : donacion.getProductos()) {
           if (productoId.equals(donado.getProductoId())) {
-            if (doc.etiquetaCategoria() != null) donado.setCategoriaId(doc.etiquetaCategoria());
-            if (doc.etiquetaSubcategoria() != null) donado.setSubcategoriaId(doc.etiquetaSubcategoria());
+            aplicarProducto(donado, doc);
           }
         }
         donacionRepository.save(donacion);
@@ -505,15 +506,32 @@ public class EventProcessingService {
     if (producto.getSubcategoria() != null) necesidad.setSubcategoriaProducto(producto.getSubcategoria());
   }
 
-  /** Si el detalle de la donación no trae categoría o subcategoría, se usa la del producto si ya se conoce. */
+  /** El producto del catálogo reclasifica el producto de la donación: ids y nombres que conozca. */
+  private static void aplicarProducto(ProductoDonado donado, ProductoDocument producto) {
+    if (producto.getCategoriaId() != null) donado.setCategoriaId(producto.getCategoriaId());
+    if (producto.getCategoria() != null) donado.setCategoria(producto.getCategoria());
+    if (producto.getSubcategoriaId() != null) donado.setSubcategoriaId(producto.getSubcategoriaId());
+    if (producto.getSubcategoria() != null) donado.setSubcategoria(producto.getSubcategoria());
+  }
+
+  /**
+   * Si el detalle de la donación no trae los nombres de la categoría o la subcategoría, se completan (con sus
+   * ids) desde el producto, si ya se conoce. Lo que el detalle sí trae no se pisa.
+   */
   private void clasificarConElProducto(ProductoDonado donado) {
-    if ((donado.getCategoriaId() != null && donado.getSubcategoriaId() != null)
+    if ((donado.getCategoria() != null && donado.getSubcategoria() != null)
         || productoRepository == null || donado.getProductoId() == null) {
       return;
     }
     productoRepository.findById(donado.getProductoId()).ifPresent(conocido -> {
-      if (donado.getCategoriaId() == null) donado.setCategoriaId(conocido.etiquetaCategoria());
-      if (donado.getSubcategoriaId() == null) donado.setSubcategoriaId(conocido.etiquetaSubcategoria());
+      if (donado.getCategoria() == null) {
+        donado.setCategoria(conocido.getCategoria());
+        if (donado.getCategoriaId() == null) donado.setCategoriaId(conocido.getCategoriaId());
+      }
+      if (donado.getSubcategoria() == null) {
+        donado.setSubcategoria(conocido.getSubcategoria());
+        if (donado.getSubcategoriaId() == null) donado.setSubcategoriaId(conocido.getSubcategoriaId());
+      }
     });
   }
 

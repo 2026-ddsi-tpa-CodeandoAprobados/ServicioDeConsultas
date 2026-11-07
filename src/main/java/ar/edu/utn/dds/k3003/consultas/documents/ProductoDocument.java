@@ -36,14 +36,4 @@ public class ProductoDocument implements Serializable {
   @Builder.Default private Boolean eliminado = false;
 
   private Instant ultimaActualizacion;
-
-  /** Lo que se muestra de la categoría: el nombre, o el id si no hay nombre. */
-  public String etiquetaCategoria() {
-    return categoria != null ? categoria : categoriaId;
-  }
-
-  /** Lo que se muestra de la subcategoría: el nombre, o el id si no hay nombre. */
-  public String etiquetaSubcategoria() {
-    return subcategoria != null ? subcategoria : subcategoriaId;
-  }
 }

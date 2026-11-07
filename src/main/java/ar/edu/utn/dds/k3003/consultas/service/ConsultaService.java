@@ -143,12 +143,13 @@ public class ConsultaService {
   /**
    * <ol>
    *   <li>{@code $unwind} de los productos, conservando las donaciones sin productos.
-   *   <li>{@code $group} por donación + categoría + subcategoría: una donación cuenta una sola vez en cada
-   *       categoría y subcategoría, aunque tenga varios productos de ella.
-   *   <li>{@code $match} opcional por categoría y/o subcategoría.
+   *   <li>{@code $group} por donación + NOMBRE de categoría + NOMBRE de subcategoría ({@code productos.categoria}
+   *       y {@code productos.subcategoria}, no los ids): una donación cuenta una sola vez en cada categoría y
+   *       subcategoría, aunque tenga varios productos de ella.
+   *   <li>{@code $match} opcional por nombre de categoría y/o subcategoría.
    *   <li>{@code $group} por categoría + subcategoría: total de donaciones y cuántas están CONQUEJA.
-   *   <li>{@code $project} con la proporción; sin categoría o subcategoría se informa
-   *       {@value #SIN_CATEGORIA} / {@value #SIN_SUBCATEGORIA} (hoy Donaciones no las publica).
+   *   <li>{@code $project} con la proporción; un producto sin nombre de categoría o subcategoría se informa
+   *       {@value #SIN_CATEGORIA} / {@value #SIN_SUBCATEGORIA}.
    *   <li>{@code $sort} por proporción descendente.
    * </ol>
    */
@@ -157,8 +158,8 @@ public class ConsultaService {
     etapas.add(Aggregation.unwind("productos", true));
     etapas.add(Aggregation.group(Fields.from(
             Fields.field("donacion", "_id"),
-            Fields.field("categoria", "productos.categoriaId"),
-            Fields.field("subcategoria", "productos.subcategoriaId")))
+            Fields.field("categoria", "productos.categoria"),
+            Fields.field("subcategoria", "productos.subcategoria")))
         .first("estado").as("estado")
         .first("ultimaActualizacion").as("ultimaActualizacion"));
 

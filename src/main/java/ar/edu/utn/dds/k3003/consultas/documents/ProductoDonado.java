@@ -16,6 +16,14 @@ public class ProductoDonado implements Serializable {
 
   private String productoId;
   private Integer cantidad;
+  /** Ids de la categoría y la subcategoría (categoriaID / subcategoriaID del detalle de Donaciones). */
   private String categoriaId;
   private String subcategoriaId;
+
+  /**
+   * Nombres de la categoría y la subcategoría. La consulta 4 agrupa y filtra por estos; si faltan, el producto
+   * se informa como SIN_CATEGORIA / general.
+   */
+  private String categoria;
+  private String subcategoria;
 }

@@ -32,8 +32,8 @@ class PipelinesConsulta4Test {
 
     assertEquals(List.of(
         "{\"$unwind\": {\"path\": \"$productos\", \"preserveNullAndEmptyArrays\": true}}",
-        "{\"$group\": {\"_id\": {\"donacion\": \"$_id\", \"categoria\": \"$productos.categoriaId\", "
-            + "\"subcategoria\": \"$productos.subcategoriaId\"}, \"estado\": {\"$first\": \"$estado\"}, "
+        "{\"$group\": {\"_id\": {\"donacion\": \"$_id\", \"categoria\": \"$productos.categoria\", "
+            + "\"subcategoria\": \"$productos.subcategoria\"}, \"estado\": {\"$first\": \"$estado\"}, "
             + "\"ultimaActualizacion\": {\"$first\": \"$ultimaActualizacion\"}}}",
         "{\"$group\": {\"_id\": {\"categoria\": \"$_id.categoria\", \"subcategoria\": \"$_id.subcategoria\"}, "
             + "\"totalDonaciones\": {\"$sum\": 1}, \"donacionesConQueja\": {\"$sum\": {\"$cond\": {\"if\": "

@@ -52,7 +52,7 @@ class Consulta4MongoTest {
   }
 
   private static ProductoDonado producto(String categoria, String subcategoria) {
-    return ProductoDonado.builder().productoId("p").cantidad(1).categoriaId(categoria).subcategoriaId(subcategoria).build();
+    return ProductoDonado.builder().productoId("p").cantidad(1).categoria(categoria).subcategoria(subcategoria).build();
   }
 
   private static DonacionDocument donacion(String id, String estado, ProductoDonado... productos) {
@@ -101,6 +101,19 @@ class Consulta4MongoTest {
     assertEquals(List.of("Higiene_Jabon"), ids(servicio.obtenerCalidad(null, "Jabon")));
     assertEquals(List.of(), ids(servicio.obtenerCalidad("Alimentos", "Jabon")));
     assertEquals(List.of("SIN_CATEGORIA_general"), ids(servicio.obtenerCalidad("SIN_CATEGORIA", null)));
+  }
+
+  @Test
+  void laCalidadAgrupaYFiltraPorNombreYNuncaPorId() {
+    ProductoDonado conIds = ProductoDonado.builder().productoId("p").cantidad(1)
+        .categoriaId("3").categoria("Alimentos").subcategoriaId("7").subcategoria("Pastas").build();
+    ProductoDonado soloIds = ProductoDonado.builder().productoId("q").cantidad(1)
+        .categoriaId("3").subcategoriaId("7").build();
+    mongo.insertAll(List.of(donacion("d1", "CONQUEJA", conIds), donacion("d2", "ACEPTADA", soloIds)));
+
+    assertEquals(List.of("Alimentos_Pastas", "SIN_CATEGORIA_general"), ids(servicio.obtenerCalidad(null, null)));
+    assertEquals(List.of("Alimentos_Pastas"), ids(servicio.obtenerCalidad("Alimentos", "Pastas")));
+    assertEquals(List.of(), ids(servicio.obtenerCalidad("3", null)), "el id no matchea");
   }
 
   private static List<String> ids(List<CalidadDonacionDocument> filas) {

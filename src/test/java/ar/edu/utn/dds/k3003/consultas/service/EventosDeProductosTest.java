@@ -126,13 +126,16 @@ class EventosDeProductosTest {
   }
 
   @Test
-  void elProductoEliminadoSeBorra() {
+  void elProductoEliminadoQuedaMarcadoEnLugarDeBorrarse() {
     EventoGenerico e = EventoGenerico.builder().id("p-del").tipo("PRODUCTO_ELIMINADO").idReferencia("7")
         .timestamp(Instant.now()).build();
 
     servicio.procesar(e);
 
-    verify(productoRepository).deleteById("7");
+    ArgumentCaptor<ProductoDocument> guardado = ArgumentCaptor.forClass(ProductoDocument.class);
+    verify(productoRepository).save(guardado.capture());
+    assertEquals(true, guardado.getValue().getEliminado());
+    verify(productoRepository, never()).deleteById(any());
   }
 
   @Test

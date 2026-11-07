@@ -67,6 +67,24 @@ public final class EventosReales {
     return leer(json, "ar.edu.utn.dds.k3003.messaging.EventoDonaciones");
   }
 
+  /**
+   * PRODUCTO_CREADO / PRODUCTO_MODIFICADO / PRODUCTO_ELIMINADO tal como los arma {@code DonacionesEventPublisher}
+   * (record {@code ProductoEvento}, {@code NON_NULL}: un null no viaja).
+   */
+  public static EventoGenerico producto(String tipo, String timestamp, String id, String nombre,
+      String categoriaId, String categoria, String subcategoriaId, String subcategoria) {
+    StringBuilder producto = new StringBuilder("\"id\":\"" + id + "\",\"nombre\":\"" + nombre + "\","
+        + "\"descripcion\":\"Paquete de 500g\"");
+    if (subcategoriaId != null) producto.append(",\"subcategoriaID\":\"").append(subcategoriaId).append('"');
+    if (subcategoria != null) producto.append(",\"subcategoria\":\"").append(subcategoria).append('"');
+    if (categoriaId != null) producto.append(",\"categoriaID\":\"").append(categoriaId).append('"');
+    if (categoria != null) producto.append(",\"categoria\":\"").append(categoria).append('"');
+    String json = """
+        {"id":"%s","tipo":"%s","timestamp":"%s","idReferencia":"%s","producto":{%s}}
+        """.formatted(uuid(), tipo, timestamp, id, producto);
+    return leer(json, "ar.edu.utn.dds.k3003.messaging.EventoDonaciones");
+  }
+
   // ---------------- Donadores y Entidades ----------------
 
   private static final String TYPE_ID_DONADORES = "ar.edu.utn.dds.k3003.messaging.events.EventoDonadores";

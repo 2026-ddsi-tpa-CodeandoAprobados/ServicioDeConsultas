@@ -447,19 +447,24 @@ public class EventProcessingService {
       return;
     }
 
+    ProductoDocument doc = productoRepository.findById(productoId)
+        .orElseGet(() -> ProductoDocument.builder().id(productoId).build());
+    // Alta, modificación y baja se ordenan por timestamp: uno más viejo que lo guardado (incluida la baja) se
+    // descarta, así un alta atrasada no resucita un producto eliminado.
+    if (noEsMasNuevo(doc.getUltimaActualizacion(), evento)) return;
+
     if (evento.getTipo().toUpperCase().contains("ELIMINADO")) {
-      productoRepository.deleteById(productoId);
+      // Baja lógica: se conserva la última clasificación conocida y no se tocan necesidades ni donaciones.
+      if (!datos.isEmpty()) copiarProducto(doc, datos);
+      doc.setEliminado(true);
+      doc.setUltimaActualizacion(evento.getTimestamp());
+      productoRepository.save(doc);
+      log.info("Producto {} marcado como eliminado", productoId);
       return;
     }
 
-    ProductoDocument doc = productoRepository.findById(productoId)
-        .orElseGet(() -> ProductoDocument.builder().id(productoId).build());
-    if (noEsMasNuevo(doc.getUltimaActualizacion(), evento)) return;
-    doc.setNombre(texto(datos, "nombre"));
-    doc.setCategoriaId(texto(datos, "categoriaID", "categoriaId"));
-    doc.setCategoria(texto(datos, "categoria"));
-    doc.setSubcategoriaId(texto(datos, "subcategoriaID", "subcategoriaId"));
-    doc.setSubcategoria(texto(datos, "subcategoria"));
+    copiarProducto(doc, datos);
+    doc.setEliminado(false);
     doc.setUltimaActualizacion(evento.getTimestamp());
     productoRepository.save(doc);
 
@@ -480,11 +485,24 @@ public class EventProcessingService {
     }
   }
 
-  /** Copia el nombre y la clasificación del producto a la necesidad (solo lo que el producto sabe). */
+  /** Los campos de {@code producto{id, nombre, descripcion, subcategoriaID, subcategoria, categoriaID, categoria}}. */
+  private static void copiarProducto(ProductoDocument doc, Map<String, Object> datos) {
+    doc.setNombre(texto(datos, "nombre"));
+    doc.setDescripcion(texto(datos, "descripcion"));
+    doc.setCategoriaId(texto(datos, "categoriaID", "categoriaId"));
+    doc.setCategoria(texto(datos, "categoria"));
+    doc.setSubcategoriaId(texto(datos, "subcategoriaID", "subcategoriaId"));
+    doc.setSubcategoria(texto(datos, "subcategoria"));
+  }
+
+  /**
+   * Copia el nombre del producto y los NOMBRES de su categoría y subcategoría a la necesidad (consulta 2, que
+   * filtra por nombre). Si el producto no trae un nombre, ese campo de la necesidad no se toca.
+   */
   private static void aplicarProducto(NecesidadUrgenteDocument necesidad, ProductoDocument producto) {
     if (producto.getNombre() != null) necesidad.setProductoNombre(producto.getNombre());
-    if (producto.etiquetaCategoria() != null) necesidad.setCategoriaProducto(producto.etiquetaCategoria());
-    if (producto.etiquetaSubcategoria() != null) necesidad.setSubcategoriaProducto(producto.etiquetaSubcategoria());
+    if (producto.getCategoria() != null) necesidad.setCategoriaProducto(producto.getCategoria());
+    if (producto.getSubcategoria() != null) necesidad.setSubcategoriaProducto(producto.getSubcategoria());
   }
 
   /** Si el detalle de la donación no trae categoría o subcategoría, se usa la del producto si ya se conoce. */

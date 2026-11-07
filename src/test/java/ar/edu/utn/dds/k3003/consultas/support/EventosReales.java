@@ -104,6 +104,26 @@ public final class EventosReales {
     return leer(json, "ar.edu.utn.dds.k3003.messaging.EventoDonaciones");
   }
 
+  /**
+   * BASE_LIMPIADA como lo publica cada módulo: Donaciones (record con {@code NON_NULL} y {@code __TypeId__},
+   * sin {@code extra}), Logística (bytes, {@code extra.traceId}) e Incentivos (bytes, {@code extra} vacío).
+   * Con otro origen se arma como Logística.
+   */
+  public static EventoGenerico baseLimpiada(String timestamp, String idReferencia) {
+    String referencia = idReferencia == null ? "" : ",\"idReferencia\":\"" + idReferencia + "\"";
+    if ("donaciones".equals(idReferencia)) {
+      String json = """
+          {"id":"%s","tipo":"BASE_LIMPIADA","timestamp":"%s"%s}
+          """.formatted(uuid(), timestamp, referencia);
+      return leer(json, "ar.edu.utn.dds.k3003.messaging.EventoDonaciones");
+    }
+    String extra = "incentivos".equals(idReferencia) ? "{}" : "{\"traceId\":\"4bf92f3577b34da6a3ce929d0e0e4736\"}";
+    String json = """
+        {"id":"%s","tipo":"BASE_LIMPIADA","timestamp":"%s"%s,"extra":%s}
+        """.formatted(uuid(), timestamp, referencia, extra);
+    return leer(json, null);
+  }
+
   // ---------------- Donadores y Entidades ----------------
 
   private static final String TYPE_ID_DONADORES = "ar.edu.utn.dds.k3003.messaging.events.EventoDonadores";

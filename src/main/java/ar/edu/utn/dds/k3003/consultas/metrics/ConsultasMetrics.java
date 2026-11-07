@@ -34,6 +34,7 @@ public class ConsultasMetrics {
   private static final Set<String> TIPOS_CONOCIDOS = Set.of(
       // Donaciones
       "DONACION_CREADA", "DONACION_ESTADO_MODIFICADO", "DONACION_ELIMINADA",
+      "PRODUCTO_CREADO", "PRODUCTO_MODIFICADO", "PRODUCTO_ELIMINADO",
       // Donadores y Entidades
       "DONADOR_CREADO", "DONADOR_ESTADO_MODIFICADO", "DONADOR_CATEGORIA_MODIFICADA", "DONADOR_ELIMINADO",
       "DONADORES_TODOS_ELIMINADOS", "ENTIDAD_CREADA", "ENTIDAD_RAZON_MODIFICADA", "ENTIDAD_ELIMINADA",
@@ -45,7 +46,7 @@ public class ConsultasMetrics {
       // Incentivos
       "DONADOR_ACTUALIZADO", "INSIGNIA_CREADA", "INSIGNIA_ELIMINADA", "MISION_CREADA", "MISION_MODIFICADA",
       "MISION_ELIMINADA",
-      // Logística e Incentivos
+      // Logística, Incentivos y Donaciones
       "BASE_LIMPIADA");
 
   private final MeterRegistry registry;

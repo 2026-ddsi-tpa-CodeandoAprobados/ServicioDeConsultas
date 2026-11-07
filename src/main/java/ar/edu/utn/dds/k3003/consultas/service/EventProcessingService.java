@@ -23,8 +23,10 @@ import org.springframework.stereotype.Service;
 @Service
 public class EventProcessingService {
 
-  /** idReferencia con el que Incentivos publica BASE_LIMPIADA. */
+  /** idReferencia con el que cada módulo publica BASE_LIMPIADA. */
   private static final String ORIGEN_INCENTIVOS = "incentivos";
+  private static final String ORIGEN_LOGISTICA = "logistica";
+  private static final String ORIGEN_DONACIONES = "donaciones";
 
   private final DonadorDocumentRepository donadorRepository;
   private final NecesidadDocumentRepository necesidadRepository;
@@ -102,8 +104,8 @@ public class EventProcessingService {
         log.info("Evento de catálogo de Incentivos '{}' [{}] ignorado: no modifica donadores",
             tipo, evento.getIdReferencia());
         descartar(MOTIVO_CATALOGO);
-      } else if (tipo.equals("BASE_LIMPIADA") && ORIGEN_INCENTIVOS.equalsIgnoreCase(evento.getIdReferencia())) {
-        handleBaseLimpiadaIncentivos(evento);
+      } else if (tipo.equals("BASE_LIMPIADA")) {
+        handleBaseLimpiada(evento);
       } else if (tipo.equals("DONADORES_TODOS_ELIMINADOS")) {
         handleDonadoresTodosEliminados();
       } else if (tipo.startsWith("PRODUCTO_")) {
@@ -130,8 +132,6 @@ public class EventProcessingService {
         handleNecesidadEliminada(evento);
       } else if (tipo.contains("ASIGNACION") || tipo.equals("ENTREGA_COMPLETADA")) {
         handleAsignacion(evento);
-      } else if (tipo.equals("BASE_LIMPIADA")) {
-        handleBaseLimpiada();
       } else if (tipo.contains("DEPOSITO")) {
         handleDeposito(evento);
       } else {
@@ -960,8 +960,43 @@ public class EventProcessingService {
         .sum();
   }
 
+  /**
+   * BASE_LIMPIADA lo publican Logística, Incentivos y Donaciones; el {@code idReferencia} dice de cuál es y solo
+   * se borra lo que aportó ese módulo. Un origen desconocido (o sin idReferencia) no borra nada.
+   */
+  private void handleBaseLimpiada(EventoGenerico evento) {
+    String origen = evento.getIdReferencia() == null ? "" : evento.getIdReferencia().toLowerCase();
+    switch (origen) {
+      case ORIGEN_LOGISTICA -> handleBaseLimpiadaLogistica();
+      case ORIGEN_INCENTIVOS -> handleBaseLimpiadaIncentivos(evento);
+      case ORIGEN_DONACIONES -> handleBaseLimpiadaDonaciones();
+      default -> {
+        log.warn("BASE_LIMPIADA con idReferencia desconocido '{}' [ID: {}], se ignora sin borrar nada",
+            evento.getIdReferencia(), evento.getId());
+        descartar(MOTIVO_NO_MAPEADO);
+      }
+    }
+  }
+
+  /**
+   * Se vació la base de Donaciones: se borran las donaciones y se recalculan los conteos de los donadores y las
+   * estadísticas de los depósitos. Entidades, necesidades, productos, asignaciones y depósitos (de otros módulos)
+   * no se tocan.
+   */
+  private void handleBaseLimpiadaDonaciones() {
+    if (donacionRepository == null) return;
+    donacionRepository.deleteAll();
+    for (DonadorDocument donador : donadorRepository.findAll()) {
+      recalcularDonador(donador.getId());
+    }
+    for (DepositoDocument deposito : depositoRepository.findAll()) {
+      recalcularDeposito(deposito.getId());
+    }
+    log.info("Donaciones borradas del modelo de lectura; donadores y depósitos recalculados");
+  }
+
   /** Se reinició la base de Logística: se borra lo que Logística había aportado al modelo de lectura. */
-  private void handleBaseLimpiada() {
+  private void handleBaseLimpiadaLogistica() {
     depositoRepository.deleteAll();
     if (asignacionRepository != null) asignacionRepository.deleteAll();
     for (NecesidadUrgenteDocument necesidad : necesidadRepository.findAll()) {

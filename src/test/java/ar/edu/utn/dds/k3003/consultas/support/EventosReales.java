@@ -246,6 +246,17 @@ public final class EventosReales {
     return leer(json, null);
   }
 
+  /** DEPOSITO_CREADO de Logística: estado completo, todavía sin stock ni algoritmo (null no viaja). */
+  public static EventoGenerico depositoCreado(String timestamp, String depositoId) {
+    String json = """
+        {"id":"%s","tipo":"DEPOSITO_CREADO","timestamp":"%s","idReferencia":"%s",
+         "deposito":{"id":"%s","nombre":"Depósito Medrano","direccion":"Medrano 951","capacidadMaxima":1000,
+           "unidadesOcupadas":0,"stock":[]},
+         "extra":{"traceId":"4bf92f3577b34da6a3ce929d0e0e4736"}}
+        """.formatted(uuid(), timestamp, depositoId, depositoId);
+    return leer(json, null);
+  }
+
   public static EventoGenerico asignacionCreada(String timestamp, String id, String donacionId,
       String productoId, int cantidad, String necesidadId) {
     String json = """

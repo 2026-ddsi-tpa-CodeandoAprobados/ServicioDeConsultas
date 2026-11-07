@@ -312,6 +312,44 @@ class EventosRealesTest {
   }
 
   @Test
+  void siElDepositoLlegaDespuesDeSusDonacionesYEntregasSusEstadisticasIgualSeCalculan() {
+    // Todo lo de Donaciones, Donadores y la entrega llega antes que cualquier evento del depósito.
+    procesar(
+        entidadCreada("2026-11-06T09:00:00Z", "4", "Comedor Los Girasoles"),
+        donacion("DONACION_CREADA", "2026-11-06T10:00:00Z", "7", "12", "3", "ACEPTADA", "5", 10),
+        asignacionCreada("2026-11-06T11:00:00Z", "a1", "7", "5", 10, "n1"),
+        necesidadRegistrada("2026-11-06T11:00:00.500Z", "n1", "4", 9, 200, "5"),
+        entregaCompletada("2026-11-06T13:00:00Z", "a1", "7", "5", 10, "n1", "2026-11-06T11:00:00Z"),
+        asignacionCreada("2026-11-06T13:30:00Z", "a2", "7", "5", 3, "n1"));
+    assertTrue(depositos.findById("3").isEmpty());
+
+    procesar(depositoCreado("2026-11-06T14:00:00Z", "3"));
+
+    DepositoDocument d = depositos.findById("3").orElseThrow();
+    assertEquals(1, d.getAsignacionesPorEstado().get("COMPLETADA"));
+    assertEquals(1, d.getAsignacionesPorEstado().get("ASIGNADA"));
+    assertEquals(180.0, d.getTiempoPromedioEntregaMinutos());
+    assertEquals(1, d.getCantidadEntidadesDistintas());
+    assertEquals(1000, d.getCapacidadTotal());
+  }
+
+  @Test
+  void unaActualizacionDeStockTambienRecalculaLasEstadisticasDelDeposito() {
+    procesar(
+        entidadCreada("2026-11-06T09:00:00Z", "4", "Comedor Los Girasoles"),
+        donacion("DONACION_CREADA", "2026-11-06T10:00:00Z", "7", "12", "3", "ACEPTADA", "5", 10),
+        asignacionCreada("2026-11-06T11:00:00Z", "a1", "7", "5", 10, "n1"),
+        necesidadRegistrada("2026-11-06T11:00:00.500Z", "n1", "4", 9, 200, "5"));
+
+    procesar(depositoStock("2026-11-06T12:00:00Z", "3", "5", 0, "7"));
+
+    DepositoDocument d = depositos.findById("3").orElseThrow();
+    assertEquals(1, d.getAsignacionesPorEstado().get("ASIGNADA"));
+    assertEquals(0, d.getAsignacionesPorEstado().get("COMPLETADA"));
+    assertNull(d.getTiempoPromedioEntregaMinutos(), "todavía no hubo entregas");
+  }
+
+  @Test
   void laAsignacionQueLlegoAntesQueLaNecesidadQuedaConSuEntidad() {
     circuitoCompleto();
 

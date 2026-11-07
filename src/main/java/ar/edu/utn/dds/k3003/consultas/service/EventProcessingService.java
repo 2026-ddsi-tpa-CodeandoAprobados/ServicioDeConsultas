@@ -866,6 +866,9 @@ public class EventProcessingService {
     if (porProducto != null) {
       actualizarStockPorDeposito(depositoId, porProducto);
     }
+    // Las donaciones y asignaciones de este depósito pueden haber llegado antes que el depósito: sin esto la
+    // consulta 3 queda sin asignaciones por estado, tiempo de entrega ni entidades hasta el próximo evento.
+    recalcularDeposito(depositoId);
   }
 
   /** Las necesidades guardan cuánto stock de su producto hay en cada depósito (consulta 2). */
